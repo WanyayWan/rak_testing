@@ -1,0 +1,32 @@
+set anaconda. (virtual enviorment )
+alwys conda activate
+full use GitHub copoliet, or anything 
+documentation 
+22 weeks  (UIUX)
+
+
+
+
+flow of the mobile app
+1. New Scenario
+2. Edit Scenario
+3. Quit
+
+1.1 Create new site (e.g. singapore polytehcnics)
+1.2 Create location (t14, 15)
+1.3 Upload any blueprint (map) (save, edit)
+1.4 camera funciton 
+	- tap a location in the map
+	- show a camera view (assign low, mid, high), categories (cracks, defect 1, abc) json file for config file. comments( allow type)
+	- allow them to draw box on the defect (multiples)
+	= export as pdf
+
+2. edit , add, or delete
+
+timeweek (just a guideline)
+- get famialr with flutter
+= design ui/ux 
+- once done with ui/ux -> discuss with RAK
+- Develpment -> iteraton 
+
+generative AI (attention is all you need)
