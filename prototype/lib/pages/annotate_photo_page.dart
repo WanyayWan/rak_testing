@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_painter/image_painter.dart'; // ^0.7.1
 
 class AnnotatePhotoPage extends StatefulWidget {
+  static const route = '/anotate_photo';
   final String imagePath;
   const AnnotatePhotoPage({super.key, required this.imagePath});
 

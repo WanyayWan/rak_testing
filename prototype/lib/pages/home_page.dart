@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../widgets/menu_button.dart';
 import 'create_page.dart';
+import 'package:prototype/pages/edit_delete_page.dart';
+
 
 class HomePage extends StatelessWidget {
   static const route = '/home';
@@ -67,7 +69,7 @@ class HomePage extends StatelessWidget {
                 MenuButton(
                   label: 'EDIT/DELETE',
                   onPressed: () {
-                    // TODO: Navigator.pushNamed(context, EditDeletePage.route);
+                    Navigator.pushNamed(context, EditDeletePage.route);
                   },
                 ),
                 const SizedBox(height: 16),

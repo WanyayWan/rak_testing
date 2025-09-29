@@ -3,6 +3,7 @@ import 'pages/create_page.dart';
 import 'pages/intro_page.dart';
 import 'pages/home_page.dart';
 import 'pages/details_page.dart';
+import 'pages/edit_delete_page.dart';
 //import 'pages/annotate_photo_page.dart';
 
 void main() => runApp(const RakApp());
@@ -20,6 +21,8 @@ class RakApp extends StatelessWidget {
         HomePage.route:  (_) => const HomePage(),
         CreatePage.route: (_) => const CreatePage(),
         DetailsPage.route: (_) => const DetailsPage(),
+        EditDeletePage.route: (_) => EditDeletePage(),
+
         
       },
     );
