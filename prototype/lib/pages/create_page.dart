@@ -56,9 +56,6 @@ class CreatePage extends StatefulWidget {
 class _CreatePageState extends State<CreatePage> {
   final _formKey = GlobalKey<FormState>();
   final _siteCtrl = TextEditingController();
-  final _locCtrl = TextEditingController();
-  final _remarksCtrl = TextEditingController();
-  DateTime? _date;
   String? _blueprintPath; // copied file path under app docs
 
   final List<ProjectEntry> _entries = [];
@@ -72,13 +69,11 @@ class _CreatePageState extends State<CreatePage> {
   @override
   void dispose() {
     _siteCtrl.dispose();
-    _locCtrl.dispose();
-    _remarksCtrl.dispose();
     super.dispose();
   }
 
   // ---------- Date & Image picking ----------
-  Future<void> _pickDate() async {
+ /* Future<void> _pickDate() async {
     final now = DateTime.now();
     final d = await showDatePicker(
       context: context,
@@ -87,16 +82,40 @@ class _CreatePageState extends State<CreatePage> {
       lastDate: DateTime(now.year + 5),
     );
     if (d != null) setState(() => _date = d);
-  }
+  } */
 
   Future<void> _pickBlueprintImage() async {
+    // 1) Ask user: Camera or Gallery
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera),
+              title: const Text('Camera'),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Gallery'),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    // 2) Pick/take the image
     final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
+      source: source,
       imageQuality: 90,
     );
     if (picked == null) return;
 
-    // copy to app documents dir so we control the lifecycle
+    // 3) Copy into app documents so the app owns the file lifecycle
     final docs = await getApplicationDocumentsDirectory();
     final destDir = Directory(p.join(docs.path, 'blueprints'));
     await destDir.create(recursive: true);
@@ -104,10 +123,11 @@ class _CreatePageState extends State<CreatePage> {
     final destPath = p.join(destDir.path, filename);
     await File(picked.path).copy(destPath);
 
-    setState(() => _blueprintPath = destPath);
+    // 4) Update UI
     if (!mounted) return;
+    setState(() => _blueprintPath = destPath);
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Blueprint image added')),
+      SnackBar(content: Text('Blueprint added from ${source == ImageSource.camera ? "Camera" : "Gallery"}')),
     );
   }
 
@@ -154,9 +174,9 @@ class _CreatePageState extends State<CreatePage> {
     final entry = ProjectEntry(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       site: _siteCtrl.text.trim(),
-      location: _locCtrl.text.trim(),
-      date: _date,
-      remarks: _remarksCtrl.text.trim(),
+      location: '',          // moved to DetailsPage
+      date: null,            // moved to DetailsPage
+      remarks: '',           // moved to DetailsPage
       blueprintImagePath: _blueprintPath,
     );
 
@@ -172,9 +192,6 @@ class _CreatePageState extends State<CreatePage> {
       _entries.add(toSave);
       // clear form for next input
       _siteCtrl.clear();
-      _locCtrl.clear();
-      _remarksCtrl.clear();
-      _date = null;
       _blueprintPath = null;
     });
     await _saveEntries(); // <-- persist after add
@@ -251,10 +268,7 @@ class _CreatePageState extends State<CreatePage> {
   // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
-    final dateLabel = _date == null
-        ? 'Select date'
-        : '${_date!.day}/${_date!.month}/${_date!.year}';
-
+    
     return Scaffold(
       appBar: AppBar(
         title: const Text('Create Page'),
@@ -282,45 +296,45 @@ class _CreatePageState extends State<CreatePage> {
                   ),
                   const SizedBox(height: 14),
 
-                  const Text('Location', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  TextFormField(
-                    controller: _locCtrl,
-                    decoration: const InputDecoration(
-                      filled: true, fillColor: Color(0xFFEDEFF2),
-                      border: OutlineInputBorder(),
-                    ),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter location' : null,
-                  ),
-                  const SizedBox(height: 14),
-
-                  const Text('Date', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  InkWell(
-                    onTap: _pickDate,
-                    child: InputDecorator(
+                /*    const Text('Location', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    TextFormField(
+                      controller: _locCtrl,
                       decoration: const InputDecoration(
                         filled: true, fillColor: Color(0xFFEDEFF2),
                         border: OutlineInputBorder(),
                       ),
-                      child: Text(dateLabel),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter location' : null,
                     ),
-                  ),
-                  const SizedBox(height: 14),
+                    const SizedBox(height: 14),
 
-                  const Text('Remarks', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  TextFormField(
-                    controller: _remarksCtrl,
-                    minLines: 1,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      filled: true, fillColor: Color(0xFFEDEFF2),
-                      border: OutlineInputBorder(),
+                    const Text('Date', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: _pickDate,
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          filled: true, fillColor: Color(0xFFEDEFF2),
+                          border: OutlineInputBorder(),
+                        ),
+                        child: Text(dateLabel),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 14),
 
+                    const Text('Remarks', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    TextFormField(
+                      controller: _remarksCtrl,
+                      minLines: 1,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        filled: true, fillColor: Color(0xFFEDEFF2),
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+*/
                   Row(
                     children: [
                       Expanded(
