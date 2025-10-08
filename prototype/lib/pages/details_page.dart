@@ -1,34 +1,49 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/painting.dart'; // for applyBoxFit
+
 
 import 'annotate_photo_page.dart';
 import 'create_page.dart'; // for ProjectEntry
+
 
 // ---------- Models (per-project) ----------
 
 class Defect {
   final String photoPath;   // annotated photo (absolute)
-  final String priority;    // "LOW", "MED", "HIGH"
+  final String severity;        
+  final String defectType;     
+  final String repairMethod;   
   final String note;
 
-  Defect({required this.photoPath, required this.priority, required this.note});
+ Defect({
+    required this.photoPath,
+    required this.severity,
+    required this.defectType,
+    required this.repairMethod,
+    required this.note,
+  });
 
   Map<String, dynamic> toJson() => {
-        'photoPath': photoPath,
-        'priority': priority,
-        
-        'note': note,
-      };
+    'photoPath': photoPath,
+    'severity': severity,
+    'defectType': defectType,
+    'repairMethod': repairMethod,
+    'note': note,
+  };
 
   factory Defect.fromJson(Map<String, dynamic> m) => Defect(
-        photoPath: (m['photoPath'] as String?) ?? '',
-        priority: (m['priority'] as String?) ?? 'LOW',
-        note: (m['note'] as String?) ?? '',
-      );
+    photoPath: (m['photoPath'] as String?) ?? '',
+    severity:  (m['severity']  as String?) ?? '',
+    defectType: (m['defectType'] as String?) ?? '',
+    repairMethod: (m['repairMethod'] as String?) ?? '',
+    note: (m['note'] as String?) ?? '',
+  );
 }
 
 class ProjectMeta {
@@ -76,6 +91,58 @@ class PinData {
       );
 }
 
+const List<String> kSeverityOptions = <String>[
+  'General View',
+  'Safe',
+  'Require Repair',
+  'Unsafe',
+  'Structural defect',
+  'Non-structural defect',
+];
+
+const List<String> kDefectTypes = <String>[
+  'Concrete Spalling with exposed rebar',
+  'Concrete Spalling without exposed rebar',
+  'Corroded steel member',
+  'Rusted steel member',
+  'Corroded fixings and brackets',
+  'Plastering cracks',
+  'Hollowness on plastering wall',
+  'Peeled off plastering',
+  'Chipped off plastering',
+  'Dry stain mark',
+  'Wet stain mark',
+  'Damaged element',
+  'Tilted element',
+  'Dented element',
+  'Misaligned element',
+  'Missing element',
+  'Deterioration of timber element',
+  'Algae growth',
+  'Peeled off/Blistering paint',
+  'Plant growth',
+  'Satisfactory',
+];
+
+const List<String> kRepairMethods = <String>[
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '7A',
+  '7B',
+  '8',
+  '9',
+  '10',
+  '11',
+  '12',
+  '13',
+  'NA',
+];
+
 // ---------- Page ----------
 
 class DetailsPage extends StatefulWidget {
@@ -88,39 +155,53 @@ class DetailsPage extends StatefulWidget {
 
 class _DetailsPageState extends State<DetailsPage> {
   bool _initialized = false; 
-  late final ProjectEntry _entry;
-  final _transform = TransformationController();
+  late final ProjectEntry _entry; // passed in via arguments
+  final _transform = TransformationController();  //interactiveViewer controller for zoom and pan
 
   final _metaFormKey = GlobalKey<FormState>();
   final _locCtrl = TextEditingController();
   final _remarksCtrl = TextEditingController();
   DateTime? _date; // required
 
-  Size? _imgDrawnSize; // the size the blueprint is drawn at (for tap mapping)
+ // Size? _imgDrawnSize; // the size the blueprint is drawn at (for tap mapping)
+  Size? _imagePixels;       // intrinsic image size
+  Size? _fittedSize;        // actual drawn image size after BoxFit.contain
+  // Offset _fittedTopLeft = Offset.zero; // top-left offset of the drawn imag
   final List<PinData> _pins = [];
 
   late final Future<Directory> _projDirFuture;
 
-  @override
+  @override                      // cleanup controllers
   void dispose() {
     _locCtrl.dispose();
     _remarksCtrl.dispose();
     super.dispose();
   }
+  //late ProjectEntry _entry;
+  String? _locationId;     // nullable now
+  String? _locationName;   // nullable now
 
-  @override
-  void didChangeDependencies() {
-    
-    super.didChangeDependencies();
-    if (_initialized) return;               // <-- guard: run once
-    _initialized = true;
-    
-    _entry = ModalRoute.of(context)!.settings.arguments as ProjectEntry;
-    _projDirFuture = _ensureProjectDir(_entry.id);
- 
-    _loadPins();
-    _loadMeta();
+@override
+void didChangeDependencies() {
+  super.didChangeDependencies();
+  if (_initialized) return;
+  _initialized = true;
+
+  final args = ModalRoute.of(context)!.settings.arguments;
+  if (args is ProjectEntry) {
+    _entry = args;
+  } else if (args is Map && args['entry'] is ProjectEntry) {
+    _entry = args['entry'] as ProjectEntry;
+    // (optional) you also have args['locationId'] / ['locationName'] if you ever need them later
+  } else {
+    throw ArgumentError('DetailsPage requires ProjectEntry or {entry: ProjectEntry}');
   }
+
+  _projDirFuture = _ensureProjectDir(_entry.id);
+  _loadPins();
+  _loadMeta();
+  _ensureImagePixels();
+}
 
   // ---------- Storage (per project) ----------
 Future<void> _pickOrCaptureBlueprint() async {
@@ -252,6 +333,8 @@ Future<void> _pickOrCaptureBlueprint() async {
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Details saved')));
+    
+    Navigator.pop(context, _locCtrl.text.trim());
   }
 
   // Optional: keep projects.json in sync (for list displays)
@@ -297,88 +380,18 @@ Future<void> _pickOrCaptureBlueprint() async {
     } catch (e) {
       debugPrint('Save pins failed: $e');
     }
+
   }
 
-    // Save the chosen blueprint into this project's folder and update state + projects.json
-  Future<void> _pickOrReplaceBlueprint() async {
-    // 1) Ask source
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera),
-              title: const Text('Camera'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Gallery'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (source == null) return;
+  Future<void> _ensureImagePixels() async {
+    final path = _entry.blueprintImagePath;
+    if (path == null || !File(path).existsSync()) return;
+    if (_imagePixels != null) return;
 
-    // 2) Pick/take photo
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 92);
-    if (picked == null) return;
-
-    // 3) Copy into *this project* folder (so it travels with the project)
-    final dir = await _projDirFuture;
-    final ext = p.extension(picked.path);
-    final destPath = p.join(dir.path, 'blueprint$ext'); // overwrite same name
-    await File(picked.path).copy(destPath);
-
-    // 4) Update in-memory entry + persist to projects.json
-    setState(() {
-      _entry = ProjectEntry(
-        id: _entry.id,
-        site: _entry.site,
-        location: _locCtrl.text.trim().isEmpty ? _entry.location : _locCtrl.text.trim(),
-        date: _date ?? _entry.date,
-        remarks: _remarksCtrl.text.trim().isEmpty ? _entry.remarks : _remarksCtrl.text.trim(),
-        blueprintImagePath: destPath,
-      );
-    });
-    await _syncBlueprintPathInProjectsJson(destPath);
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Blueprint ${File(destPath).existsSync() ? "saved" : "updated"}')),
-    );
-  }
-
-  // keep projects.json in sync with the new blueprint path
-  Future<void> _syncBlueprintPathInProjectsJson(String absPath) async {
-    try {
-      final docs = await getApplicationDocumentsDirectory();
-      final file = File(p.join(docs.path, 'data', 'projects.json'));
-      if (!await file.exists()) return;
-
-      final raw = await file.readAsString();
-      final list = (jsonDecode(raw) as List).cast<dynamic>();
-      final entries = list.map((e) => ProjectEntry.fromJson((e as Map).cast<String, dynamic>())).toList();
-
-      final idx = entries.indexWhere((e) => e.id == _entry.id);
-      if (idx >= 0) {
-        entries[idx] = ProjectEntry(
-          id: entries[idx].id,
-          site: entries[idx].site,
-          location: entries[idx].location,
-          date: entries[idx].date,
-          remarks: entries[idx].remarks,
-          blueprintImagePath: absPath,
-        );
-        await file.writeAsString(jsonEncode(entries.map((e) => e.toJson()).toList()));
-      }
-    } catch (e) {
-      debugPrint('Sync blueprint path failed: $e');
-    }
+    final bytes = await File(path).readAsBytes();
+    final codec = await instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    _imagePixels = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
   }
 
   Future<void> _loadPins() async {
@@ -402,34 +415,41 @@ Future<void> _pickOrCaptureBlueprint() async {
   String _nextLabel() => 'A${_pins.length + 1}';
   // ---------- Tap / Long-press interactions ----------
 
-  void _onTapUp(TapUpDetails d) async {
-     if (_imgDrawnSize == null) return;
+ /* Offset _toScene(Offset viewportPoint) {
+  final inv = Matrix4.inverted(_transform.value);
+  final scene = MatrixUtils.transformPoint(inv, viewportPoint);
+  return scene;
+}
+*/
 
-  final inverse = Matrix4.inverted(_transform.value);
-  final local = MatrixUtils.transformPoint(inverse, d.localPosition);
+/* void _onTapUp(TapUpDetails d) async {
+  if (_fittedSize == null) return;
 
-  final nx = (local.dx / _imgDrawnSize!.width).clamp(0.0, 1.0);
-  final ny = (local.dy / _imgDrawnSize!.height).clamp(0.0, 1.0);
+  final scenePt = _toScene(d.localPosition);
 
-  // 1) Optimistic: show pin immediately
+  final inside = Rect.fromLTWH(
+    _fittedTopLeft.dx, _fittedTopLeft.dy, _fittedSize!.width, _fittedSize!.height,
+  );
+  if (!inside.contains(scenePt)) return;
+
+  final localInImage = scenePt - _fittedTopLeft;
+  final nx = (localInImage.dx / _fittedSize!.width ).clamp(0.0, 1.0);
+  final ny = (localInImage.dy / _fittedSize!.height).clamp(0.0, 1.0);
+
   final tempPin = PinData(nx: nx, ny: ny, label: _nextLabel(), defects: []);
   setState(() => _pins.add(tempPin));
 
-  // 2) Run capture+annotate flow
   final defect = await _captureAndAnnotateDefect();
-
   if (!mounted) return;
 
   if (defect == null) {
-    // 3) User cancelled: remove the temp pin
     setState(() => _pins.remove(tempPin));
     return;
   }
 
-  // 4) Success: attach first defect and persist
   setState(() => tempPin.defects.add(defect));
   await _savePins();
-}
+} */
 
   Future<void> _onLongPressPin(int index) async {
     final ok = await showDialog<bool>(
@@ -523,8 +543,17 @@ Future<void> _pickOrCaptureBlueprint() async {
                       leading: File(d.photoPath).existsSync()
                           ? Image.file(File(d.photoPath), width: 48, height: 48, fit: BoxFit.cover)
                           : const Icon(Icons.broken_image),
-                      title: Text(d.priority),
-                      subtitle: Text(d.note.isEmpty ? '(no note)' : d.note, maxLines: 2, overflow: TextOverflow.ellipsis),
+                      title: Text(d.severity),
+                      subtitle: Text(
+                        [
+                          if (d.defectType.isNotEmpty) 'Type: ${d.defectType}',
+                          if (d.repairMethod.isNotEmpty) 'Repair: ${d.repairMethod}',
+                          if (d.note.isNotEmpty) 'Note: ${d.note}',
+                        ].join('\n'),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    //  isThreeLine: true,
                       trailing: IconButton(
                         icon: const Icon(Icons.close, color: Colors.red),
                         onPressed: () async {
@@ -534,25 +563,43 @@ Future<void> _pickOrCaptureBlueprint() async {
                         },
                       ),
                       onTap: () {
-                        // preview
-                        showDialog(
-                          context: context,
-                          builder: (_) => Dialog(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (File(d.photoPath).existsSync())
-                                  Image.file(File(d.photoPath), fit: BoxFit.contain),
-                                Padding(
-                                  padding: const EdgeInsets.all(8.0),
-                                  child: Text('Priority: ${d.priority}\n${d.note}'),
-                                ),
-                                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
+  showDialog(
+    context: context,
+    builder: (_) => Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (File(d.photoPath).existsSync())
+                Image.file(File(d.photoPath), fit: BoxFit.contain),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  [
+                    'Severity: ${d.severity}',
+                    if (d.defectType.isNotEmpty) 'Type: ${d.defectType}',
+                    if (d.repairMethod.isNotEmpty) 'Repair: ${d.repairMethod}',
+                    if (d.note.isNotEmpty) 'Note: ${d.note}',
+                  ].join('\n'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+},
+
                     ),
                   );
                 }),
@@ -614,77 +661,117 @@ Future<void> _pickOrCaptureBlueprint() async {
   isScrollControlled: true,
   useSafeArea: true,
   builder: (sheetCtx) {
-    // create once per sheet
     final noteCtrl = TextEditingController();
-    String? priority;
+    String? severity;
+    String? defectType;
+    String? repairMethod;
 
     return StatefulBuilder(
       builder: (ctx, setModalState) {
+        final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+        final sysPad = MediaQuery.of(ctx).viewPadding; // safe padding for bars
+
         return Padding(
           padding: EdgeInsets.only(
-            left: 16, right: 16, top: 16,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            left: 16, right: 16, top: 16 + sysPad.top, bottom: 16 + bottomInset + sysPad.bottom,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text('Defect details', style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Defect details', style: TextStyle(fontWeight: FontWeight.bold)),
 
-              DropdownButtonFormField<String>(
-                value: priority,
-                items: const [
-                  DropdownMenuItem(value: 'LOW',  child: Text('LOW PRIORITY')),
-                  DropdownMenuItem(value: 'MED',  child: Text('MED PRIORITY')),
-                  DropdownMenuItem(value: 'HIGH', child: Text('HIGH PRIORITY')),
-                ],
-                onChanged: (v) => setModalState(() => priority = v),
-                decoration: const InputDecoration(
-                  labelText: 'Priority', border: OutlineInputBorder(),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: severity,
+                  items: kSeverityOptions.map((s) =>
+                    DropdownMenuItem(value: s, child: Text(s))
+                  ).toList(),
+                  onChanged: (v) => setModalState(() => severity = v),
+                  decoration: const InputDecoration(
+                    labelText: 'Severity', border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
 
-              TextField(
-                controller: noteCtrl,
-                minLines: 1, maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Note', border: OutlineInputBorder(),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: defectType,
+                  items: kDefectTypes.map((s) =>
+                    DropdownMenuItem(value: s, child: Text(s))
+                  ).toList(),
+                  onChanged: (v) => setModalState(() => defectType = v),
+                  decoration: const InputDecoration(
+                    labelText: 'Defect type', border: OutlineInputBorder(),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
 
-              FilledButton(
-                onPressed: () async {
-                  String? p = priority;
-                  String n = noteCtrl.text.trim();
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: repairMethod,
+                  items: kRepairMethods.map((s) =>
+                    DropdownMenuItem(value: s, child: Text(s))
+                  ).toList(),
+                  onChanged: (v) => setModalState(() => repairMethod = v),
+                  decoration: const InputDecoration(
+                    labelText: 'Repair method', border: OutlineInputBorder(),
+                  ),
+                ),
 
-                  if (p == null || p.isEmpty || n.isEmpty) {
-                    final ok = await _confirmSaveWithDefaults();
-                    if (!ok) return;
-                    p ??= 'LOW';
+                const SizedBox(height: 10),
+                TextField(
+                  controller: noteCtrl,
+                  minLines: 1, maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Note (optional)', border: OutlineInputBorder(),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: () async {
+                    // Graceful defaults if user leaves fields empty
+                    String sv = (severity ?? '').trim();
+                    String dt = (defectType ?? '').trim();
+                    String rm = (repairMethod ?? '').trim();
+                    String n  = noteCtrl.text.trim();
+
+                    // If any of the 3 dropdowns are empty -> confirm + set defaults
+                    if (sv.isEmpty || dt.isEmpty || rm.isEmpty) {
+                      final ok = await _confirmSaveWithDefaults();
+                      if (!ok) return;
+                      if (sv.isEmpty) sv = 'General View';
+                      if (dt.isEmpty) dt = 'Other';
+                      if (rm.isEmpty) rm = 'Other';
+                    }
                     if (n.isEmpty) n = 'No remarks provided';
-                  }
 
-                  Navigator.pop(sheetCtx, {'priority': p!, 'note': n});
-                },
-                child: const Text('SAVE'),
-              ),
-            ],
+                    Navigator.pop(sheetCtx, {
+                      'severity': sv,
+                      'defectType': dt,
+                      'repairMethod': rm,
+                      'note': n,
+                    });
+                  },
+                  child: const Text('SAVE'),
+                ),
+              ],
+            ),
           ),
         );
       },
     );
   },
 );
-    if (result == null) return null;
+if (result == null) return null;
 
-    return Defect(
+        return Defect(
       photoPath: absPath,
-      priority: result['priority'] ?? 'LOW',
+      severity: result['severity'] ?? 'General View',
+      defectType: result['defectType'] ?? 'Other',
+      repairMethod: result['repairMethod'] ?? 'Other',
       note: (result['note']?.trim().isEmpty ?? true) ? 'No remarks provided' : result['note']!.trim(),
-    );
+    ) ;
   }
 
 Future<bool> _confirmSaveWithDefaults() async {
@@ -693,7 +780,7 @@ Future<bool> _confirmSaveWithDefaults() async {
         builder: (_) => AlertDialog(
           title: const Text('Save with defaults?'),
           content: const Text(
-              'Priority or Note is empty.\n\nSave anyway using defaults?\n• Priority: LOW\n• Note: "No remarks provided"'),
+              'You haven\'t provided all required fields.\n\nSave anyway using defaults?\n•'),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
             FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save anyway')),
@@ -720,10 +807,26 @@ Future<bool> _confirmSaveWithDefaults() async {
         ),
       ],
     ),
-      
-      body: LayoutBuilder(
+     body: SafeArea(           
+      top: true,
+      bottom: true,
+      left: true,
+      right: true,
+      child: LayoutBuilder(
         builder: (context, box) {
           final boxSize = Size(box.maxWidth, box.maxHeight);
+          // Compute drawn image size for BoxFit.contain
+         /* if (_imagePixels != null) {
+            final fitted = applyBoxFit(BoxFit.contain, _imagePixels!, boxSize);
+            _fittedSize = fitted.destination;
+            _fittedTopLeft = Offset(
+              (boxSize.width  - _fittedSize!.width ) / 2.0,
+              (boxSize.height - _fittedSize!.height) / 2.0,
+            );
+          } else {
+            _fittedSize = null;
+          //_fittedTopLeft = Offset.zero;
+          } */
 
           final dateLabel = _date == null
             ? 'Select date'
@@ -731,7 +834,7 @@ Future<bool> _confirmSaveWithDefaults() async {
 
           // We'll draw the blueprint "contain" inside the available box.
           // For simplicity here we just use the whole area; InteractiveViewer will handle zoom/pan.
-          _imgDrawnSize = boxSize;
+
 
           final blueprintChild = hasBlueprint
                     ? Image.file(File(_entry.blueprintImagePath!), key: ValueKey(_entry.blueprintImagePath), // busts image cache on path change
@@ -842,67 +945,156 @@ Future<bool> _confirmSaveWithDefaults() async {
 
               // ---- Blueprint + Pins area (your existing code), now inside Expanded ----
               Expanded(
+  child: LayoutBuilder(
+    builder: (context, constraints) {
+      final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+
+      // compute fitted size for BoxFit.contain using the intrinsic image size if available
+      final hasImageSize = _imagePixels != null && hasBlueprint;
+      Size drawnSize;
+      if (hasImageSize) {
+        final fitted = applyBoxFit(BoxFit.contain, _imagePixels!, viewportSize);
+        drawnSize = fitted.destination; // actual image draw size inside the viewport
+      } else {
+        // no blueprint yet -> just fill the viewport so taps/pins still work
+        drawnSize = viewportSize;
+      }
+
+      final imgW = drawnSize.width;
+      final imgH = drawnSize.height;
+
+      return SafeArea(
+        bottom: true, // adds safe padding for gesture nav bars/etc
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12), // optional
+            child: Container(
+              color: const Color(0xFFEEF1F6),        // optional background
+              child: InteractiveViewer(
+                transformationController: _transform,
+                minScale: 0.5,
+                maxScale: 8,
+                // IMPORTANT: keep zoom/pan inside this container
+                constrained: true,                 // child constrained to this box
+                boundaryMargin: EdgeInsets.zero,   // no extra pan outside
+                clipBehavior: Clip.hardEdge,       // clip to this box
                 child: Center(
                   child: SizedBox(
-                    width: boxSize.width,
-                    height: boxSize.height,
-                    child: Stack(
-                      children: [
-                        InteractiveViewer(
-                          transformationController: _transform,
-                          minScale: 0.5,
-                          maxScale: 8,
-                          clipBehavior: Clip.none,
-                          child: GestureDetector(
-                            onTapUp: _onTapUp,
-                            child: SizedBox(
-                              width: boxSize.width,
-                              height: boxSize.height,
-                              child: blueprintChild,
-                            ),
-                          ),
-                        ),
-                        ..._pins.asMap().entries.map((e) {
-                          final i = e.key;
-                          final pin = e.value;
-                          final dx = pin.nx * boxSize.width;
-                          final dy = pin.ny * boxSize.height;
-                          return Positioned(
-                            left: dx - 16,
-                            top: dy - 32,
-                            child: GestureDetector(
-                              onTap: () => _openPinSheet(i),
-                              onLongPress: () => _onLongPressPin(i),
-                              child: Stack(
-                                alignment: Alignment.center,
+                    width: imgW,
+                    height: imgH,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapUp: (d) async {
+                        // d.localPosition is already in this SizedBox’s coordinates
+                        final local = d.localPosition;
+                        if (local.dx < 0 || local.dy < 0 || local.dx > imgW || local.dy > imgH) return;
+
+                        final nx = (local.dx / imgW).clamp(0.0, 1.0);
+                        final ny = (local.dy / imgH).clamp(0.0, 1.0);
+
+                        final tempPin = PinData(nx: nx, ny: ny, label: _nextLabel(), defects: []);
+                        setState(() => _pins.add(tempPin));
+
+                        final defect = await _captureAndAnnotateDefect();
+                        if (!mounted) return;
+                        if (defect == null) {
+                          setState(() => _pins.remove(tempPin));
+                          return;
+                        }
+                        setState(() => tempPin.defects.add(defect));
+                        await _savePins();
+                      },
+                      child: Stack(
+                        children: [
+                          // blueprint image / placeholder
+                          if (hasBlueprint)
+                            Image.file(
+                              File(_entry.blueprintImagePath!),
+                              key: ValueKey(_entry.blueprintImagePath), // refresh when path changes
+                              fit: BoxFit.contain,  // keep aspect ratio
+                              width: imgW,
+                              height: imgH,
+                            )
+                          else
+                            Container(
+                              width: imgW,
+                              height: imgH,
+                              color: const Color(0xFFF5F6FA),
+                              alignment: Alignment.center,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.location_on, size: 36, color: Colors.red),
-                                  Container(
-                                    margin: const EdgeInsets.only(top: 10),
-                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      pin.label,
-                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-                                    ),
+                                  const Text(
+                                    'No blueprint yet.\nYou can still place pins.\n\nAdd a blueprint for better context.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Colors.black54),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  FilledButton.icon(
+                                    icon: const Icon(Icons.add_photo_alternate),
+                                    label: const Text('Add Blueprint'),
+                                    onPressed: _pickOrCaptureBlueprint,
                                   ),
                                 ],
                               ),
                             ),
-                          );
-                        }),
-                      ],
+
+                          // PINS (now inside the same transform!)
+                          ..._pins.asMap().entries.map((e) {
+                            final i   = e.key;
+                            final pin = e.value;
+                            final px  = pin.nx * imgW;
+                            final py  = pin.ny * imgH;
+
+                            return Positioned(
+                              left: px - 16,
+                              top:  py - 32,
+                              child: GestureDetector(
+                                onTap: () => _openPinSheet(i),
+                                onLongPress: () => _onLongPressPin(i),
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    const Icon(Icons.location_on, size: 36, color: Colors.red),
+                                    Container(
+                                      margin: const EdgeInsets.only(top: 10),
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        pin.label,
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
+            ),
+          ),
+        ),
+      );
+    },
+  ),
+)
+
+
             ],
           );
         },
       ),
+      ),
+              
     );
   }
 }

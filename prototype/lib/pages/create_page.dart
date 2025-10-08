@@ -7,8 +7,9 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'details_page.dart';
+import 'location_page.dart';
 
-class ProjectEntry {
+class ProjectEntry { // model class for a project entry
   String id;
   String site;
   String location;
@@ -16,7 +17,7 @@ class ProjectEntry {
   String remarks;
   String? blueprintImagePath; // stored under app docs dir
 
-  ProjectEntry({
+  ProjectEntry({  // constructor, required means it must be provided when creating an instance
     required this.id,
     required this.site,
     required this.location,
@@ -87,7 +88,7 @@ class _CreatePageState extends State<CreatePage> {
   Future<void> _pickBlueprintImage() async {
     // 1) Ask user: Camera or Gallery
     final source = await showModalBottomSheet<ImageSource>(
-      context: context,
+      context: context,     // the context of the current widget
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -110,7 +111,7 @@ class _CreatePageState extends State<CreatePage> {
 
     // 2) Pick/take the image
     final picked = await ImagePicker().pickImage(
-      source: source,
+      source: source,  // either camera or gallery
       imageQuality: 90,
     );
     if (picked == null) return;
@@ -183,7 +184,7 @@ class _CreatePageState extends State<CreatePage> {
     // Navigate to DetailsPage; allow editing there. When it returns with an updated entry, save it.
     final updated = await Navigator.pushNamed(
       context,
-      DetailsPage.route,
+      LocationPage.route,
       arguments: entry,
     ) as ProjectEntry?;
 
@@ -198,18 +199,14 @@ class _CreatePageState extends State<CreatePage> {
   }
 
   Future<void> _editEntry(ProjectEntry entry) async {
-    final updated = await Navigator.pushNamed(
-      context,
-      DetailsPage.route,
-      arguments: entry,
-    ) as ProjectEntry?;
-    if (updated == null) return;
-    setState(() {
-      final idx = _entries.indexWhere((e) => e.id == entry.id);
-      if (idx >= 0) _entries[idx] = updated;
-    });
-    await _saveEntries(); // <-- persist after edit
-  }
+  await Navigator.pushNamed(
+    context,
+    LocationPage.route,
+    arguments: entry,
+  );
+
+
+}
 
   Future<void> _deleteEntry(ProjectEntry entry) async {
     setState(() => _entries.removeWhere((e) => e.id == entry.id));

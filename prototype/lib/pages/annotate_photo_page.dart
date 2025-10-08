@@ -1,4 +1,3 @@
-// lib/pages/annotate_photo_page.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_painter/image_painter.dart'; // ^0.7.1
@@ -53,7 +52,7 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
         scalable: true,
         showControls: true,
         controlsAtTop: true,
-        // Optional: limit/define available colors in the toolbar
+        
         colors: const [
           Colors.red,
           Colors.green,
@@ -62,10 +61,7 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
           Colors.black,
           Colors.white,
         ],
-        // You can also hook into changes:
-        // onPaintModeChanged: (mode) {},
-        // onColorChanged: (c) {},
-        // onStrokeWidthChanged: (w) {},
+
       ),
     );
   }
