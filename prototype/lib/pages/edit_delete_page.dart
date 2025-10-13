@@ -1,10 +1,12 @@
+// lib/pages/edit_delete_page.dart
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'create_page.dart';   // for ProjectEntry model
-import 'details_page.dart';  // to open the operation screen
+
+import 'create_page.dart';    // ProjectEntry model
+import 'location_page.dart';  // <- open locations list for a project
 
 class EditDeletePage extends StatefulWidget {
   static const route = '/edit-delete';
@@ -42,6 +44,8 @@ class _EditDeletePageState extends State<EditDeletePage> {
             ..clear()
             ..addAll(list.map((e) => ProjectEntry.fromJson((e as Map).cast<String, dynamic>())));
         });
+      } else {
+        setState(() => _entries.clear());
       }
     } catch (e) {
       debugPrint('Load entries failed: $e');
@@ -65,7 +69,7 @@ class _EditDeletePageState extends State<EditDeletePage> {
       final docs = await getApplicationDocumentsDirectory();
       final dir = Directory(p.join(docs.path, 'data', 'projects', id));
       if (await dir.exists()) {
-        await dir.delete(recursive: true); // delete tags/photos for this project
+        await dir.delete(recursive: true); // deletes locations, photos, blueprints, pins
       }
     } catch (e) {
       debugPrint('Delete project folder failed: $e');
@@ -77,8 +81,9 @@ class _EditDeletePageState extends State<EditDeletePage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Delete project?'),
-        content: Text('This will remove "${entry.site} — ${entry.location}" '
-            'from your list and delete its local defects/photos.'),
+        content: Text(
+          'This will remove "${entry.site}" from your list and delete all its locations, photos, blueprints and pins on this device.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
@@ -87,8 +92,11 @@ class _EditDeletePageState extends State<EditDeletePage> {
     );
     if (ok != true) return;
 
+    // Remove from in-memory list + persist projects.json
     setState(() => _entries.removeWhere((e) => e.id == entry.id));
     await _saveEntries();
+
+    // Remove project folder on disk
     await _deleteProjectFolder(entry.id);
 
     if (!mounted) return;
@@ -97,20 +105,18 @@ class _EditDeletePageState extends State<EditDeletePage> {
     );
   }
 
-  Future<void> _edit(ProjectEntry entry) async {
-    // Open your existing Operation/Details page.
-    await Navigator.pushNamed(context, DetailsPage.route, arguments: entry);
-
-    // When returning, nothing to change in the list for now,
-    // but you might want to refresh something if Details can update blueprint etc.
-    // setState(() {}); // if you later allow editing core fields.
+  Future<void> _openLocations(ProjectEntry entry) async {
+    // Go to LocationPage for this project (manage locations under the site)
+    await Navigator.pushNamed(context, LocationPage.route, arguments: entry);
+    // If you ever allow editing project meta on LocationPage and want to refresh this list, call:
+    // await _loadEntries();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Edit / Delete'),
+        title: const Text('Projects — Edit / Delete'),
         backgroundColor: const Color(0xFF1A237E),
         foregroundColor: Colors.white,
       ),
@@ -127,7 +133,15 @@ class _EditDeletePageState extends State<EditDeletePage> {
                     return ListTile(
                       contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                       title: Text(e.site, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(e.location),
+                      subtitle: Text(
+                        [
+                          if (e.location.isNotEmpty) e.location,
+                          if (e.remarks.isNotEmpty) 'Remarks: ${e.remarks}',
+                          // you could also load and show a locations count here if desired
+                        ].join('\n'),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -136,8 +150,8 @@ class _EditDeletePageState extends State<EditDeletePage> {
                               backgroundColor: const Color(0xFF1A237E),
                               foregroundColor: Colors.white,
                             ),
-                            onPressed: () => _edit(e),
-                            child: const Text('EDIT'),
+                            onPressed: () => _openLocations(e), // EDIT -> open LocationPage
+                            child: const Text('OPEN'),
                           ),
                           const SizedBox(width: 8),
                           OutlinedButton(
@@ -146,7 +160,7 @@ class _EditDeletePageState extends State<EditDeletePage> {
                           ),
                         ],
                       ),
-                      onTap: () => _edit(e), // tap row also edits
+                      onTap: () => _openLocations(e), // tapping the row also opens locations
                     );
                   },
                 ),

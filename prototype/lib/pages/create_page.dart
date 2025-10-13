@@ -332,29 +332,7 @@ class _CreatePageState extends State<CreatePage> {
                     ),
                     const SizedBox(height: 16),
 */
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: _pickBlueprintImage,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF1A237E),
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('UPLOAD BLUEPRINT'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _exportAllToPdf,
-                          child: const Text('EXPORT ALL'),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
+                
                   SizedBox(
                     height: 48,
                     child: ElevatedButton(

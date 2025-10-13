@@ -155,7 +155,7 @@ class DetailsPage extends StatefulWidget {
 
 class _DetailsPageState extends State<DetailsPage> {
   bool _initialized = false; 
-  late final ProjectEntry _entry; // passed in via arguments
+  late ProjectEntry _entry; // passed in via arguments
   final _transform = TransformationController();  //interactiveViewer controller for zoom and pan
 
   final _metaFormKey = GlobalKey<FormState>();
@@ -178,121 +178,171 @@ class _DetailsPageState extends State<DetailsPage> {
     super.dispose();
   }
   //late ProjectEntry _entry;
-  String? _locationId;     // nullable now
-  String? _locationName;   // nullable now
+  
+  late String _locationId;
+  late String _locationName;
+  late Future<Directory> _locationDirFuture;
 
 @override
 void didChangeDependencies() {
   super.didChangeDependencies();
   if (_initialized) return;
   _initialized = true;
+  
 
   final args = ModalRoute.of(context)!.settings.arguments;
-  if (args is ProjectEntry) {
-    _entry = args;
-  } else if (args is Map && args['entry'] is ProjectEntry) {
-    _entry = args['entry'] as ProjectEntry;
-    // (optional) you also have args['locationId'] / ['locationName'] if you ever need them later
+
+  if (args is Map) {
+    // from LocationPage
+    _entry        = args['entry'] as ProjectEntry;
+    _locationId   = (args['locationId'] as String?) ?? DateTime.now().millisecondsSinceEpoch.toString();
+    _locationName = (args['locationName'] as String?) ?? 'Untitled';
+  } else if (args is ProjectEntry) {
+    // legacy path (if somewhere you still push just the entry)
+    _entry        = args;
+    _locationId   = 'default';
+    _locationName = 'Default';
   } else {
-    throw ArgumentError('DetailsPage requires ProjectEntry or {entry: ProjectEntry}');
+    throw FlutterError('DetailsPage: missing or invalid arguments.');
   }
 
-  _projDirFuture = _ensureProjectDir(_entry.id);
+  _locationDirFuture = _ensureLocationDir(_entry.id, _locationId);
+  Future.microtask(() async {
+  await _loadBlueprintPathIntoEntry();
+  await _ensureImagePixels();    // so BoxFit math knows the intrinsic size
+  if (mounted) setState(() {});  // paint with the loaded path/size
+});
+  
+
   _loadPins();
   _loadMeta();
   _ensureImagePixels();
 }
 
+ Future<Directory> _ensureLocationDir(String projectId, String locationId) async {
+    final docs = await getApplicationDocumentsDirectory();
+    final dir = Directory(p.join(docs.path, 'data', 'projects', projectId, 'locations', locationId));
+    await dir.create(recursive: true);
+    // also create photos subfolder up front
+    await Directory(p.join(dir.path, 'photos')).create(recursive: true);
+    return dir;
+  }
+
+  Future<File> _pinsFile() async {
+    final dir = await _locationDirFuture;
+    final f = File(p.join(dir.path, 'tags.json'));
+    await f.parent.create(recursive: true);
+    return f;
+  }
+
+  Future<File> _metaFile() async {
+    final dir = await _locationDirFuture;
+    final f = File(p.join(dir.path, 'project_meta.json'));
+    await f.parent.create(recursive: true);
+    return f;
+  }
+
+  Future<String?> _findExistingBlueprintPath() async {
+  final dir = await _locationDirFuture;
+  if (!await dir.exists()) return null;
+
+  final exts = ['.png', '.jpg', '.jpeg', '.webp'];
+  for (final f in await dir.list().toList()) {
+    if (f is File) {
+      final name = p.basename(f.path).toLowerCase();
+      if (name.startsWith('blueprint') && exts.any((e) => name.endsWith(e))) {
+        return f.path;
+      }
+    }
+  }
+  return null;
+}
+
+Future<void> _loadBlueprintPathIntoEntry() async {
+  final bp = await _findExistingBlueprintPath();
+  if (!mounted) return;
+  setState(() {
+    _entry = ProjectEntry(
+      id: _entry.id,
+      site: _entry.site,
+      location: _entry.location,
+      date: _entry.date,
+      remarks: _entry.remarks,
+      blueprintImagePath: bp,   // <- inject per-location blueprint
+    );
+  });
+}
+
+
+  Future<Directory> _photosDir() async {
+    final dir = await _locationDirFuture;
+    final photos = Directory(p.join(dir.path, 'photos'));
+    await photos.create(recursive: true);
+    return photos;
+  }
   // ---------- Storage (per project) ----------
 Future<void> _pickOrCaptureBlueprint() async {
-  // Ask for source
   final source = await showModalBottomSheet<ImageSource>(
     context: context,
-    builder: (ctx) => SafeArea(
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        ListTile(
-          leading: const Icon(Icons.photo_camera),
-          title: const Text('Camera'),
-          onTap: () => Navigator.pop(ctx, ImageSource.camera),
-        ),
-        ListTile(
-          leading: const Icon(Icons.photo_library),
-          title: const Text('Gallery'),
-          onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-        ),
-      ]),
+    builder: (sheetCtx) => SafeArea(
+      child: Wrap(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera),
+            title: const Text('Camera'),
+            onTap: () => Navigator.pop(sheetCtx, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library),
+            title: const Text('Gallery'),
+            onTap: () => Navigator.pop(sheetCtx, ImageSource.gallery),
+          ),
+        ],
+      ),
     ),
   );
   if (source == null) return;
 
-  // Pick / take photo
   final picked = await ImagePicker().pickImage(source: source, imageQuality: 92);
   if (picked == null) return;
 
-  // Copy into this project's folder so we control its lifecycle
-  final projDir = await _projDirFuture; // .../data/projects/<id>
-  final ext = p.extension(picked.path).isEmpty ? '.jpg' : p.extension(picked.path);
-  final dest = File(p.join(projDir.path, 'blueprint$ext'));
+  final locDir = await _locationDirFuture;
+
+  // remove old blueprint.* so we keep exactly one file
+  for (final f in await locDir.list().toList()) {
+    if (f is File && p.basename(f.path).toLowerCase().startsWith('blueprint')) {
+      await f.delete();
+    }
+  }
+
+  final ext  = p.extension(picked.path).isEmpty ? '.jpg' : p.extension(picked.path);
+  final dest = File(p.join(locDir.path, 'blueprint$ext'));
   await dest.writeAsBytes(await File(picked.path).readAsBytes());
 
   if (!mounted) return;
-
-  // Update state so UI re-builds immediately
   setState(() {
-    _entry.blueprintImagePath = dest.path;
+    _entry = ProjectEntry(
+      id: _entry.id,
+      site: _entry.site,
+      location: _entry.location,
+      date: _entry.date,
+      remarks: _entry.remarks,
+      blueprintImagePath: dest.path,
+    );
+    _imagePixels = null;  // force re-read of intrinsic size
   });
 
-  // (Optional) keep projects.json in sync so lists show the thumbnail later
-  try {
-    final docs = await getApplicationDocumentsDirectory();
-    final file = File(p.join(docs.path, 'data', 'projects.json'));
-    if (await file.exists()) {
-      final raw = await file.readAsString();
-      final list = (jsonDecode(raw) as List).cast<dynamic>();
-      final entries = list
-          .map((e) => ProjectEntry.fromJson((e as Map).cast<String, dynamic>()))
-          .toList();
-      final i = entries.indexWhere((e) => e.id == _entry.id);
-      if (i >= 0) {
-        entries[i] = ProjectEntry(
-          id: entries[i].id,
-          site: entries[i].site,
-          location: entries[i].location,
-          date: entries[i].date,
-          remarks: entries[i].remarks,
-          blueprintImagePath: dest.path,
-        );
-        await file.writeAsString(jsonEncode(entries.map((e) => e.toJson()).toList()));
-      }
-    }
-  } catch (e) {
-    debugPrint('sync blueprint path failed: $e');
-  }
+  await _ensureImagePixels();     // read size
+  if (!mounted) return;
+  _transform.value = Matrix4.identity(); // center/fit
+  setState(() {});                // repaint with new size
 
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(content: Text('Blueprint added from ${source == ImageSource.camera ? "Camera" : "Gallery"}')),
   );
 }
 
-  Future<Directory> _ensureProjectDir(String id) async {
-    final docs = await getApplicationDocumentsDirectory();
-    final dir = Directory(p.join(docs.path, 'data', 'projects', id));
-    await dir.create(recursive: true);
-    return dir;
-  }
 
-  Future<File> _pinsFile() async {
-    final dir = await _projDirFuture;
-    final f = File(p.join(dir.path, 'tags.json'));
-    await f.parent.create(recursive: true);
-    return f;
-  }
-  Future<File> _metaFile() async {
-  final dir = await _projDirFuture;
-  final f = File(p.join(dir.path, 'project_meta.json'));
-  await f.parent.create(recursive: true);
-  return f;
-}
 
   Future<void> _loadMeta() async {
     try {
@@ -365,12 +415,6 @@ Future<void> _pickOrCaptureBlueprint() async {
     }
   }
 
-  Future<Directory> _photosDir() async {
-    final dir = await _projDirFuture;
-    final photos = Directory(p.join(dir.path, 'photos'));
-    await photos.create(recursive: true);
-    return photos;
-  }
 
   Future<void> _savePins() async {
     try {
@@ -384,15 +428,15 @@ Future<void> _pickOrCaptureBlueprint() async {
   }
 
   Future<void> _ensureImagePixels() async {
-    final path = _entry.blueprintImagePath;
-    if (path == null || !File(path).existsSync()) return;
-    if (_imagePixels != null) return;
+  final path = _entry.blueprintImagePath;
+  if (path == null || !File(path).existsSync()) return;
+  if (_imagePixels != null) return;
 
-    final bytes = await File(path).readAsBytes();
-    final codec = await instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    _imagePixels = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
-  }
+  final bytes = await File(path).readAsBytes();
+  final codec = await instantiateImageCodec(bytes);
+  final frame = await codec.getNextFrame();
+  _imagePixels = Size(frame.image.width.toDouble(), frame.image.height.toDouble());
+}
 
   Future<void> _loadPins() async {
     try {
@@ -794,7 +838,9 @@ Future<bool> _confirmSaveWithDefaults() async {
 
   @override
   Widget build(BuildContext context) {
-    final hasBlueprint = (_entry.blueprintImagePath != null) && File(_entry.blueprintImagePath!).existsSync();
+    final hasBlueprint = (_entry.blueprintImagePath?.isNotEmpty ?? false)
+    && File(_entry.blueprintImagePath!).existsSync();
+
 
     return Scaffold(
           appBar: AppBar(

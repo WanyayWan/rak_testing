@@ -85,7 +85,7 @@ class _LocationPageState extends State<LocationPage> {
     }
   }
 
-  Future<void> _renameLocation(LocationLabel loc) async {
+Future<void> _renameLocation(LocationLabel loc) async {
   final ctrl = TextEditingController(text: loc.name);
   final newName = await showDialog<String>(
     context: context,
@@ -104,11 +104,11 @@ class _LocationPageState extends State<LocationPage> {
       ],
     ),
   );
-
   if (newName == null || newName.isEmpty) return;
-  final idx = _locations.indexWhere((e) => e.id == loc.id);
-  if (idx < 0) return;
-  setState(() => _locations[idx] = LocationLabel(id: loc.id, name: newName));
+
+  final i = _locations.indexWhere((e) => e.id == loc.id);
+  if (i < 0) return;
+  setState(() => _locations[i] = LocationLabel(id: loc.id, name: newName));
   await _saveLocations();
 }
 
@@ -124,32 +124,83 @@ void _openLocation(LocationLabel loc) {
   );
 }
 Future<void> _addLocation() async {
-  if (!mounted) return;
-  Navigator.pushNamed(
+  // create a new empty location id
+  final newId = DateTime.now().millisecondsSinceEpoch.toString();
+
+  // ensure the folder exists so DetailsPage can save files immediately
+  final docs = await getApplicationDocumentsDirectory();
+  final locDir = Directory(p.join(docs.path, 'data', 'projects', _entry.id, 'locations', newId));
+  await locDir.create(recursive: true);
+  await Directory(p.join(locDir.path, 'photos')).create(recursive: true);
+
+  // go to details to enter the name there; expect a String name on pop
+  final result = await Navigator.pushNamed(
     context,
     DetailsPage.route,
-    arguments: {'entry': _entry},
-  ).then((_) => _loadLocations());
+    arguments: {
+      'entry': _entry,
+      'locationId': newId,
+      'locationName': '', // empty; user will enter in DetailsPage
+    },
+  );
+
+  if (result is String && result.trim().isNotEmpty) {
+    final loc = LocationLabel(id: newId, name: result.trim());
+    setState(() => _locations.add(loc));
+    await _saveLocations();
+  } else {
+    // user backed out without saving -> optional: clean up the empty folder
+    if (await locDir.exists()) {
+      try { await locDir.delete(recursive: true); } catch (_) {}
+    }
+  }
 }
 
   Future<void> _deleteLocation(LocationLabel loc) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete this location?'),
-        content: Text('This removes the label from the list. '
-            'Existing files under this location folder are not automatically deleted.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
-        ],
-      ),
-    );
-    if (ok != true) return;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Delete this location?'),
+      content: Text('This will delete all files for this location (blueprint, pins, photos).'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+      ],
+    ),
+  );
+  if (ok != true) return;
 
-    setState(() => _locations.removeWhere((e) => e.id == loc.id));
-    await _saveLocations();
+  // Remove folder
+  final docs = await getApplicationDocumentsDirectory();
+  final dir = Directory(p.join(docs.path, 'data', 'projects', _entry.id, 'locations', loc.id));
+  if (await dir.exists()) {
+    await dir.delete(recursive: true);
   }
+
+  // Update list
+  setState(() => _locations.removeWhere((e) => e.id == loc.id));
+  await _saveLocations();
+}
+
+Future<void> _editLocation(LocationLabel loc) async {
+  final result = await Navigator.pushNamed(
+    context,
+    DetailsPage.route,
+    arguments: {
+      'entry': _entry,
+      'locationId': loc.id,
+      'locationName': loc.name,
+    },
+  );
+
+  if (result is String && result.trim().isNotEmpty) {
+    final i = _locations.indexWhere((e) => e.id == loc.id);
+    if (i >= 0) {
+      setState(() => _locations[i] = LocationLabel(id: loc.id, name: result.trim()));
+      await _saveLocations();
+    }
+  }
+}
 
   @override
   Widget build(BuildContext context) {
@@ -186,7 +237,7 @@ Future<void> _addLocation() async {
                               IconButton(
                                 icon: const Icon(Icons.edit_outlined),
                                 tooltip: 'Edit',
-                                onPressed: () => _renameLocation(loc),
+                                onPressed: () => _editLocation(loc),
                               ),
                               IconButton(
                                 icon: const Icon(Icons.delete_outline),
@@ -202,26 +253,11 @@ Future<void> _addLocation() async {
               ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-  onPressed: () async {
-    final result = await Navigator.pushNamed(
-      context,
-      DetailsPage.route,
-      arguments: { 'entry': _entry }, // just the project; new location is created after save
-    );
-
-    // If DetailsPage popped with a non-empty location name, create a new list item
-    if (result is String && result.trim().isNotEmpty) {
-      final loc = LocationLabel(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: result.trim(),
-      );
-      setState(() => _locations.add(loc));
-      await _saveLocations();
-    }
-  },
+  onPressed: _addLocation,            // <-- just call your helper
   icon: const Icon(Icons.add),
   label: const Text('Create new label'),
 ),
+
     );
   }
 }
