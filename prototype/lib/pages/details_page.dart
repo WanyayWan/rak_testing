@@ -50,19 +50,22 @@ class ProjectMeta {
   final String location;     // required
   final DateTime date;       // required
   final String remarks;      // optional
+  final String personInCharge;        // optional 
 
-  ProjectMeta({required this.location, required this.date, required this.remarks});
+  ProjectMeta({required this.location, required this.date,  required this.remarks, this.personInCharge = ''});
 
   Map<String, dynamic> toJson() => {
         'location': location,
         'date': date.toIso8601String(),
         'remarks': remarks,
+        'PIC': personInCharge,
       };
 
   factory ProjectMeta.fromJson(Map<String, dynamic> m) => ProjectMeta(
         location: (m['location'] as String?) ?? '',
         date: DateTime.tryParse((m['date'] as String?) ?? '') ?? DateTime.now(),
         remarks: (m['remarks'] as String?) ?? '',
+        personInCharge: (m['PIC'] as String?) ?? '',
       );
 }
 
@@ -157,7 +160,7 @@ class _DetailsPageState extends State<DetailsPage> {
   bool _initialized = false; 
   late ProjectEntry _entry; // passed in via arguments
   final _transform = TransformationController();  //interactiveViewer controller for zoom and pan
-
+  final _personInChargeCtrl = TextEditingController(); // NEW for PIC
   final _metaFormKey = GlobalKey<FormState>();
   final _locCtrl = TextEditingController();
   final _remarksCtrl = TextEditingController();
@@ -175,6 +178,7 @@ class _DetailsPageState extends State<DetailsPage> {
   void dispose() {
     _locCtrl.dispose();
     _remarksCtrl.dispose();
+    _personInChargeCtrl.dispose();
     super.dispose();
   }
   //late ProjectEntry _entry;
@@ -355,6 +359,7 @@ Future<void> _pickOrCaptureBlueprint() async {
           _locCtrl.text = m.location;
           _date = m.date;
           _remarksCtrl.text = m.remarks;
+          _personInChargeCtrl.text = m.personInCharge;
         });
       } else {
         _date = null; // not set yet
@@ -366,7 +371,9 @@ Future<void> _pickOrCaptureBlueprint() async {
 
   Future<void> _saveMeta() async {
     if (!_metaFormKey.currentState!.validate()) return;
-    final meta = ProjectMeta(
+    final meta = ProjectMeta
+    (
+      personInCharge: _personInChargeCtrl.text.trim(),
       location: _locCtrl.text.trim(),
       date: _date!, // validated non-null
       remarks: _remarksCtrl.text.trim(),
@@ -521,10 +528,14 @@ Future<void> _pickOrCaptureBlueprint() async {
       builder: (_) {
         final pin = _pins[index];
         return StatefulBuilder(builder: (ctx, setModal) {
+          final sys = MediaQuery.of(ctx).viewPadding;
+          final kb  = MediaQuery.of(ctx).viewInsets.bottom;
           return Padding(
             padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom,
-              left: 16, right: 16, top: 16,
+              left: 16,
+              right: 16,
+              top: 16 + sys.top,            // avoid status bar / cutouts
+              bottom: 16 + sys.bottom + kb, // avoid gesture bar + keyboard
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -923,6 +934,20 @@ Future<bool> _confirmSaveWithDefaults() async {
                         const Text('Project Details', style: TextStyle(fontWeight: FontWeight.bold)),
                         const SizedBox(height: 10),
 
+                        const Text('Person in Charge', style: TextStyle(fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 6),
+                          TextFormField(
+                            controller: _personInChargeCtrl,
+                            decoration: const InputDecoration(
+                              filled: true,
+                              fillColor: Color(0xFFEDEFF2),
+                              border: OutlineInputBorder(),
+                              hintText: 'Enter full name',
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+
                         const Text('Location', style: TextStyle(fontWeight: FontWeight.w600)),
                         const SizedBox(height: 6),
                         TextFormField(
@@ -955,8 +980,8 @@ Future<bool> _confirmSaveWithDefaults() async {
                           ),
                         ),
                         const SizedBox(height: 12),
-                        if (_date == null)
-                          const Text('Date is required', style: TextStyle(color: Colors.red, fontSize: 12)),
+                       //f (_date == null)
+                       // const Text('Date is required', style: TextStyle(color: Colors.red, fontSize: 12)),
 
                         const SizedBox(height: 12),
                         const Text('Remarks (optional)', style: TextStyle(fontWeight: FontWeight.w600)),
