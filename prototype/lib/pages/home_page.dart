@@ -1,11 +1,13 @@
+//this is the first page after the intro page
+
 import 'package:flutter/material.dart';
 import '../widgets/menu_button.dart';
 import 'create_page.dart';
 import 'package:prototype/pages/edit_delete_page.dart';
 
 
-class HomePage extends StatelessWidget {
-  static const route = '/home';
+class HomePage extends StatelessWidget {    // stateless widget as no state to manage 
+  static const route = '/home'; // route name for navigation
   const HomePage({super.key});
 
   @override
