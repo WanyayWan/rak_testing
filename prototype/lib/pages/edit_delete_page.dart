@@ -2,11 +2,10 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path/path.dart' as p;
+import 'package:path/path.dart' as p; 
 import 'package:path_provider/path_provider.dart';
-
 import 'create_page.dart';    // ProjectEntry model
-import 'location_page.dart';  // <- open locations list for a project
+import 'location_page.dart';  //  open locations list for a project
 
 class EditDeletePage extends StatefulWidget {
   static const route = '/edit-delete';

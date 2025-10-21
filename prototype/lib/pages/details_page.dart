@@ -1,21 +1,20 @@
-import 'dart:convert';
-import 'dart:io';
-import 'dart:ui';
-import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
-import 'package:flutter/painting.dart'; // for applyBoxFit
-
-
+import 'dart:convert';// lets u convert to/from JSON
+import 'dart:io'; //give access to file and directory operation like creating, writing files
+import 'dart:ui'; // for custom painting 
+import 'package:flutter/material.dart'; // for materials like scaffold, appbar, buttons
+import 'package:image_picker/image_picker.dart'; // allow app to capture images from camera or gallery
+import 'package:path/path.dart' as p; // such as joining paths and extracting file names safely
+import 'package:path_provider/path_provider.dart'; // lets u find safe directories on the devices for storing files
+import 'package:flutter/painting.dart'; // for positioning and sizing images
 import 'annotate_photo_page.dart';
-import 'create_page.dart'; // for ProjectEntry
+import 'create_page.dart'; 
+
 
 
 // ---------- Models (per-project) ----------
 
 class Defect {
-  final String photoPath;   // annotated photo (absolute)
+  final String photoPath;  
   final String severity;        
   final String defectType;     
   final String repairMethod;   
@@ -29,15 +28,16 @@ class Defect {
     required this.note,
   });
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toJson() => { // building a map for json encoding
     'photoPath': photoPath,
     'severity': severity,
     'defectType': defectType,
     'repairMethod': repairMethod,
     'note': note,
   };
-
-  factory Defect.fromJson(Map<String, dynamic> m) => Defect(
+//the keyword factory is used to define a special kind of constructor —
+//one that can control what gets returned when you create an object.
+  factory Defect.fromJson(Map<String, dynamic> m) => Defect( // takes a Json back to Defect object
     photoPath: (m['photoPath'] as String?) ?? '',
     severity:  (m['severity']  as String?) ?? '',
     defectType: (m['defectType'] as String?) ?? '',
@@ -71,8 +71,10 @@ class ProjectMeta {
 
 class PinData {
   final double nx; // 0..1
-  final double ny; // 0..1
-  String label;
+  final double ny; // 0..1 
+  //normalized x/y coordinates (from 0 to 1), meaning they are relative to the image size 
+  //instead of pixel-based — so they scale correctly.
+  String label; //a short tag for the label 
   final List<Defect> defects;
 
   PinData({required this.nx, required this.ny, required this.label, required this.defects});
@@ -157,31 +159,30 @@ class DetailsPage extends StatefulWidget {
 }
 
 class _DetailsPageState extends State<DetailsPage> {
-  bool _initialized = false; 
-  late ProjectEntry _entry; // passed in via arguments
+  bool _initialized = false; // this is to ensure didChangeDependencies runs only once and prevents redundant initializations
+  late ProjectEntry _entry; // the main project object passed from previous page
   final _transform = TransformationController();  //interactiveViewer controller for zoom and pan
-  final _personInChargeCtrl = TextEditingController(); // NEW for PIC
-  final _metaFormKey = GlobalKey<FormState>();
-  final _locCtrl = TextEditingController();
-  final _remarksCtrl = TextEditingController();
+  final _personInChargeCtrl = TextEditingController(); // text controller for person in charge field
+  final _metaFormKey = GlobalKey<FormState>(); // that identifies the form for validation
+  final _locCtrl = TextEditingController(); //  text controller for location field
+  //final _remarksCtrl = TextEditingController();   // text controller for remarks field
   DateTime? _date; // required
 
  // Size? _imgDrawnSize; // the size the blueprint is drawn at (for tap mapping)
   Size? _imagePixels;       // intrinsic image size
-  Size? _fittedSize;        // actual drawn image size after BoxFit.contain
-  // Offset _fittedTopLeft = Offset.zero; // top-left offset of the drawn imag
-  final List<PinData> _pins = [];
+  Size? _fittedSize;        // actual drawn image size after BoxFit.contain in other words scaling down to fit the display
+  // Offset _fittedTopLeft = Offset.zero; // top-left offset of the drawn imag   
+  final List<PinData> _pins = []; 
 
   late final Future<Directory> _projDirFuture;
 
-  @override                      // cleanup controllers
+  @override                    
   void dispose() {
     _locCtrl.dispose();
     _remarksCtrl.dispose();
     _personInChargeCtrl.dispose();
     super.dispose();
   }
-  //late ProjectEntry _entry;
   
   late String _locationId;
   late String _locationName;
