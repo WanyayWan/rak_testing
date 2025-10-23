@@ -34,11 +34,11 @@ class _IntroPageState extends State<IntroPage> { // State class for IntroPage ev
             mainAxisAlignment: MainAxisAlignment.center,  // Align items to the center vertically
             children: [ 
               // This part is for the logo and welcome text
-              Image(
-                image: AssetImage('assets/images/logo.png'),
-                height: 100,
-              ),
-              SizedBox(height: 20),
+          //    Image(
+          //      image: AssetImage('assets/images/logo.png'),
+          //      height: 100,
+          //    ),
+          //    SizedBox(height: 20),
               Text(
                 'Welcome to\nR.A.K. MATERIALS CONSULTANTS',
                 textAlign: TextAlign.center,

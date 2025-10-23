@@ -165,16 +165,16 @@ class _DetailsPageState extends State<DetailsPage> {
   final _personInChargeCtrl = TextEditingController(); // text controller for person in charge field
   final _metaFormKey = GlobalKey<FormState>(); // that identifies the form for validation
   final _locCtrl = TextEditingController(); //  text controller for location field
-  //final _remarksCtrl = TextEditingController();   // text controller for remarks field
+  final _remarksCtrl = TextEditingController();   // text controller for remarks field
   DateTime? _date; // required
 
  // Size? _imgDrawnSize; // the size the blueprint is drawn at (for tap mapping)
   Size? _imagePixels;       // intrinsic image size
-  Size? _fittedSize;        // actual drawn image size after BoxFit.contain in other words scaling down to fit the display
+  //Size? _fittedSize;        // actual drawn image size after BoxFit.contain in other words scaling down to fit the display
   // Offset _fittedTopLeft = Offset.zero; // top-left offset of the drawn imag   
   final List<PinData> _pins = []; 
 
-  late final Future<Directory> _projDirFuture;
+  //late final Future<Directory> _projDirFuture;
 
   @override                    
   void dispose() {
@@ -185,7 +185,7 @@ class _DetailsPageState extends State<DetailsPage> {
   }
   
   late String _locationId;
-  late String _locationName;
+  //late String _locationName;
   late Future<Directory> _locationDirFuture;
 
 @override
@@ -201,12 +201,12 @@ void didChangeDependencies() {
     // from LocationPage
     _entry        = args['entry'] as ProjectEntry;
     _locationId   = (args['locationId'] as String?) ?? DateTime.now().millisecondsSinceEpoch.toString();
-    _locationName = (args['locationName'] as String?) ?? 'Untitled';
+  //  _locationName = (args['locationName'] as String?) ?? 'Untitled';
   } else if (args is ProjectEntry) {
     // legacy path (if somewhere you still push just the entry)
     _entry        = args;
     _locationId   = 'default';
-    _locationName = 'Default';
+  //  _locationName = 'Default';
   } else {
     throw FlutterError('DetailsPage: missing or invalid arguments.');
   }
@@ -918,251 +918,258 @@ Future<bool> _confirmSaveWithDefaults() async {
                         ),
                       );
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // [E] ---- Project Details form (Location / Date / Remarks) ----
-              Card(
-                elevation: 1,
-                margin: const EdgeInsets.all(12),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Form(
-                    key: _metaFormKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const Text('Project Details', style: TextStyle(fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 10),
+         return Column(
+  crossAxisAlignment: CrossAxisAlignment.stretch,
+  children: [
+    // ---- Blueprint + Pins area ON TOP ----
+    Expanded(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+          final hasImageSize = _imagePixels != null && hasBlueprint;
+          Size drawnSize;
+          if (hasImageSize) {
+            final fitted = applyBoxFit(BoxFit.contain, _imagePixels!, viewportSize);
+            drawnSize = fitted.destination;
+          } else {
+            drawnSize = viewportSize;
+          }
 
-                        const Text('Person in Charge', style: TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 6),
-                          TextFormField(
-                            controller: _personInChargeCtrl,
-                            decoration: const InputDecoration(
-                              filled: true,
-                              fillColor: Color(0xFFEDEFF2),
-                              border: OutlineInputBorder(),
-                              hintText: 'Enter full name',
-                            ),
-                          ),
-                          const SizedBox(height: 12),
+          final imgW = drawnSize.width;
+          final imgH = drawnSize.height;
 
+          return SafeArea(
+            bottom: true,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  color: const Color(0xFFEEF1F6),
+                  child: InteractiveViewer(
+                    transformationController: _transform,
+                    minScale: 0.5,
+                    maxScale: 8,
+                    constrained: true,
+                    boundaryMargin: EdgeInsets.zero,
+                    clipBehavior: Clip.hardEdge,
+                    child: Center(
+                      child: SizedBox(
+                        width: imgW,
+                        height: imgH,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTapUp: (d) async {
+                            final local = d.localPosition;
+                            if (local.dx < 0 || local.dy < 0 || local.dx > imgW || local.dy > imgH) return;
 
-                        const Text('Location', style: TextStyle(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: _locCtrl,
-                          validator: (v) => (v == null || v.trim().isEmpty) ? 'Location is required' : null,
-                          decoration: const InputDecoration(
-                            filled: true, fillColor: Color(0xFFEDEFF2), border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
+                            final nx = (local.dx / imgW).clamp(0.0, 1.0);
+                            final ny = (local.dy / imgH).clamp(0.0, 1.0);
 
-                        const Text('Date', style: TextStyle(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        InkWell(
-                          onTap: () async {
-                            final now = DateTime.now();
-                            final picked = await showDatePicker(
-                              context: context,
-                              initialDate: _date ?? now,
-                              firstDate: DateTime(now.year - 5),
-                              lastDate: DateTime(now.year + 5),
-                            );
-                            if (picked != null) setState(() => _date = picked);
+                            final tempPin = PinData(nx: nx, ny: ny, label: _nextLabel(), defects: []);
+                            setState(() => _pins.add(tempPin));
+
+                            final defect = await _captureAndAnnotateDefect();
+                            if (!mounted) return;
+                            if (defect == null) {
+                              setState(() => _pins.remove(tempPin));
+                              return;
+                            }
+                            setState(() => tempPin.defects.add(defect));
+                            await _savePins();
                           },
-                          child: InputDecorator(
-                            decoration: const InputDecoration(
-                              filled: true, fillColor: Color(0xFFEDEFF2), border: OutlineInputBorder(),
-                            ),
-                            child: Text(dateLabel),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                       //f (_date == null)
-                       // const Text('Date is required', style: TextStyle(color: Colors.red, fontSize: 12)),
-
-                        const SizedBox(height: 12),
-                        const Text('Remarks (optional)', style: TextStyle(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: _remarksCtrl,
-                          minLines: 1, maxLines: 3,
-                          decoration: const InputDecoration(
-                            filled: true, fillColor: Color(0xFFEDEFF2), border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        SizedBox(
-                          height: 44,
-                          child: ElevatedButton.icon(
-                            icon: const Icon(Icons.save),
-                            label: const Text('Save Details'),
-                            onPressed:  _saveMeta,
-                            
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF1A237E),
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-
-              // ---- Blueprint + Pins area (your existing code), now inside Expanded ----
-              Expanded(
-  child: LayoutBuilder(
-    builder: (context, constraints) {
-      final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
-
-      // compute fitted size for BoxFit.contain using the intrinsic image size if available
-      final hasImageSize = _imagePixels != null && hasBlueprint;
-      Size drawnSize;
-      if (hasImageSize) {
-        final fitted = applyBoxFit(BoxFit.contain, _imagePixels!, viewportSize);
-        drawnSize = fitted.destination; // actual image draw size inside the viewport
-      } else {
-        // no blueprint yet -> just fill the viewport so taps/pins still work
-        drawnSize = viewportSize;
-      }
-
-      final imgW = drawnSize.width;
-      final imgH = drawnSize.height;
-
-      return SafeArea(
-        bottom: true, // adds safe padding for gesture nav bars/etc
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12), // optional
-            child: Container(
-              color: const Color(0xFFEEF1F6),        // optional background
-              child: InteractiveViewer(
-                transformationController: _transform,
-                minScale: 0.5,
-                maxScale: 8,
-                // IMPORTANT: keep zoom/pan inside this container
-                constrained: true,                 // child constrained to this box
-                boundaryMargin: EdgeInsets.zero,   // no extra pan outside
-                clipBehavior: Clip.hardEdge,       // clip to this box
-                child: Center(
-                  child: SizedBox(
-                    width: imgW,
-                    height: imgH,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTapUp: (d) async {
-                        // d.localPosition is already in this SizedBox’s coordinates
-                        final local = d.localPosition;
-                        if (local.dx < 0 || local.dy < 0 || local.dx > imgW || local.dy > imgH) return;
-
-                        final nx = (local.dx / imgW).clamp(0.0, 1.0);
-                        final ny = (local.dy / imgH).clamp(0.0, 1.0);
-
-                        final tempPin = PinData(nx: nx, ny: ny, label: _nextLabel(), defects: []);
-                        setState(() => _pins.add(tempPin));
-
-                        final defect = await _captureAndAnnotateDefect();
-                        if (!mounted) return;
-                        if (defect == null) {
-                          setState(() => _pins.remove(tempPin));
-                          return;
-                        }
-                        setState(() => tempPin.defects.add(defect));
-                        await _savePins();
-                      },
-                      child: Stack(
-                        children: [
-                          // blueprint image / placeholder
-                          if (hasBlueprint)
-                            Image.file(
-                              File(_entry.blueprintImagePath!),
-                              key: ValueKey(_entry.blueprintImagePath), // refresh when path changes
-                              fit: BoxFit.contain,  // keep aspect ratio
-                              width: imgW,
-                              height: imgH,
-                            )
-                          else
-                            Container(
-                              width: imgW,
-                              height: imgH,
-                              color: const Color(0xFFF5F6FA),
-                              alignment: Alignment.center,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Text(
-                                    'No blueprint yet.\nYou can still place pins.\n\nAdd a blueprint for better context.',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(color: Colors.black54),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  FilledButton.icon(
-                                    icon: const Icon(Icons.add_photo_alternate),
-                                    label: const Text('Add Blueprint'),
-                                    onPressed: _pickOrCaptureBlueprint,
-                                  ),
-                                ],
-                              ),
-                            ),
-
-                          // PINS (now inside the same transform!)
-                          ..._pins.asMap().entries.map((e) {
-                            final i   = e.key;
-                            final pin = e.value;
-                            final px  = pin.nx * imgW;
-                            final py  = pin.ny * imgH;
-
-                            return Positioned(
-                              left: px - 16,
-                              top:  py - 32,
-                              child: GestureDetector(
-                                onTap: () => _openPinSheet(i),
-                                onLongPress: () => _onLongPressPin(i),
-                                child: Stack(
+                          child: Stack(
+                            children: [
+                              if (hasBlueprint)
+                                Image.file(
+                                  File(_entry.blueprintImagePath!),
+                                  key: ValueKey(_entry.blueprintImagePath),
+                                  fit: BoxFit.contain,
+                                  width: imgW,
+                                  height: imgH,
+                                )
+                              else
+                                Container(
+                                  width: imgW,
+                                  height: imgH,
+                                  color: const Color(0xFFF5F6FA),
                                   alignment: Alignment.center,
-                                  children: [
-                                    const Icon(Icons.location_on, size: 36, color: Colors.red),
-                                    Container(
-                                      margin: const EdgeInsets.only(top: 10),
-                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(4),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Text(
+                                        'No blueprint yet.\nYou can still place pins.\n\nAdd a blueprint for better context.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: Colors.black54),
                                       ),
-                                      child: Text(
-                                        pin.label,
-                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                      const SizedBox(height: 12),
+                                      FilledButton.icon(
+                                        icon: const Icon(Icons.add_photo_alternate),
+                                        label: const Text('Add Blueprint'),
+                                        onPressed: _pickOrCaptureBlueprint,
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            );
-                          }),
-                        ],
+
+                              // pins
+                              ..._pins.asMap().entries.map((e) {
+                                final i = e.key;
+                                final pin = e.value;
+                                final px = pin.nx * imgW;
+                                final py = pin.ny * imgH;
+
+                                return Positioned(
+                                  left: px - 16,
+                                  top: py - 32,
+                                  child: GestureDetector(
+                                    onTap: () => _openPinSheet(i),
+                                    onLongPress: () => _onLongPressPin(i),
+                                    child: Stack(
+                                      alignment: Alignment.center,
+                                      children: [
+                                        const Icon(Icons.location_on, size: 36, color: Colors.red),
+                                        Container(
+                                          margin: const EdgeInsets.only(top: 10),
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Text(
+                                            pin.label,
+                                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
+          );
+        },
+      ),
+    ),
+
+    // ---- Project Details form BELOW ----
+    Card(
+      elevation: 1,
+      margin: const EdgeInsets.all(12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Form(
+          key: _metaFormKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Project Details', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+
+              const Text('Person in Charge', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              TextFormField(
+                controller: _personInChargeCtrl,
+                decoration: const InputDecoration(
+                  isDense: true, // <-- make compact
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  filled: true,
+                  fillColor: Color(0xFFEDEFF2),
+                  border: OutlineInputBorder(),
+                  hintText: 'Enter full name',
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              const Text('Location', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              TextFormField(
+                controller: _locCtrl,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Location is required' : null,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  filled: true,
+                  fillColor: Color(0xFFEDEFF2),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              const Text('Date', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              InkWell(
+                onTap: () async {
+                  final now = DateTime.now();
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _date ?? now,
+                    firstDate: DateTime(now.year - 5),
+                    lastDate: DateTime(now.year + 5),
+                  );
+                  if (picked != null) setState(() => _date = picked);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    filled: true,
+                    fillColor: Color(0xFFEDEFF2),
+                    border: OutlineInputBorder(),
+                  ),
+                  child: Text(
+                    _date == null
+                        ? 'Select date'
+                        : '${_date!.day}/${_date!.month}/${_date!.year}',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              const Text('Remarks (optional)', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 4),
+              TextFormField(
+                controller: _remarksCtrl,
+                minLines: 1,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  filled: true,
+                  fillColor: Color(0xFFEDEFF2),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              SizedBox(
+                height: 40,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.save, size: 18),
+                  label: const Text('Save Details'),
+                  onPressed: _saveMeta,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1A237E),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-      );
-    },
-  ),
-)
+      ),
+    ),
+  ],
+);
 
-
-            ],
-          );
         },
       ),
       ),
