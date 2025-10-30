@@ -60,7 +60,8 @@ class ProjectMeta {
         'remarks': remarks,
         'PIC': personInCharge,
       };
-
+//the keyword factory is used to define a special kind of constructor —
+//one that can control what gets returned when you create an object.
   factory ProjectMeta.fromJson(Map<String, dynamic> m) => ProjectMeta(
         location: (m['location'] as String?) ?? '',
         date: DateTime.tryParse((m['date'] as String?) ?? '') ?? DateTime.now(),
@@ -70,8 +71,8 @@ class ProjectMeta {
 }
 
 class PinData {
-  final double nx; // 0..1
-  final double ny; // 0..1 
+  double nx; // 0..1
+  double ny; // 0..1 
   //normalized x/y coordinates (from 0 to 1), meaning they are relative to the image size 
   //instead of pixel-based — so they scale correctly.
   String label; //a short tag for the label 
@@ -85,7 +86,8 @@ class PinData {
         'label': label,
         'defects': defects.map((d) => d.toJson()).toList(),
       };
-
+//the keyword factory is used to define a special kind of constructor —
+//one that can control what gets returned when you create an object.
   factory PinData.fromJson(Map<String, dynamic> m) => PinData(
         nx: (m['nx'] as num).toDouble(),
         ny: (m['ny'] as num).toDouble(),
@@ -147,6 +149,7 @@ const List<String> kRepairMethods = <String>[
   '13',
   'NA',
 ];
+Offset _draggingOffset = Offset.zero; // To track the current dragging offset
 
 // ---------- Page ----------
 
@@ -332,7 +335,7 @@ Future<void> _pickOrCaptureBlueprint() async {
       location: _entry.location,
       date: _entry.date,
       remarks: _entry.remarks,
-      blueprintImagePath: dest.path,
+      blueprintImagePath: dest.path, 
     );
     _imagePixels = null;  // force re-read of intrinsic size
   });
@@ -340,12 +343,13 @@ Future<void> _pickOrCaptureBlueprint() async {
   await _ensureImagePixels();     // read size
   if (!mounted) return;
   _transform.value = Matrix4.identity(); // center/fit
-  setState(() {});                // repaint with new size
+  setState(() {});                // Rebuild UI with new blueprint
 
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(content: Text('Blueprint added from ${source == ImageSource.camera ? "Camera" : "Gallery"}')),
   );
 }
+
 
 
 
@@ -503,7 +507,7 @@ Future<void> _pickOrCaptureBlueprint() async {
   await _savePins();
 } */
 
-  Future<void> _onLongPressPin(int index) async {
+  /*Future<void> _onLongPressPin(int index) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -518,7 +522,7 @@ Future<void> _pickOrCaptureBlueprint() async {
     if (ok != true) return;
     setState(() => _pins.removeAt(index));
     await _savePins();
-  }
+  }  */
 
   // Tapping a pin opens its defect list (bottom sheet) with add/delete
   void _openPinSheet(int index) {
@@ -698,18 +702,26 @@ Future<void> _pickOrCaptureBlueprint() async {
     final picked = await ImagePicker().pickImage(source: source, imageQuality: 92);
     if (picked == null) return null;
 
-    // 3) annotate
-    final annotatedBytes = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => AnnotatePhotoPage(imagePath: picked.path)),
-    ) as List<int>?; // works with Uint8List too
-    if (annotatedBytes == null) return null;
+    // NEW
+      // 3) annotate — write ONCE directly to final destination
+      final photosDir = await _photosDir();
+      final filename  = 'ann_${DateTime.now().millisecondsSinceEpoch}.png';
+      final absPath   = p.join(photosDir.path, filename);
 
-    // 4) save file to project/photos
-    final photosDir = await _photosDir();
-    final filename = 'ann_${DateTime.now().millisecondsSinceEpoch}.png';
-    final absPath = p.join(photosDir.path, filename);
-    await File(absPath).writeAsBytes(annotatedBytes);
+      final String? savedPath = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AnnotatePhotoPage(
+            imagePath: picked.path,
+            finalSavePath: absPath, // single write; no temp→copy
+          ),
+        ),
+      );
+      if (savedPath == null) return null;
+
+// (optional) precache to remove first-frame decode hitch
+await precacheImage(FileImage(File(savedPath)), context);
+
 
     // 5) collect priority + note (with confirmation + defaults)
     final result = await showModalBottomSheet<Map<String, String>>(
@@ -740,7 +752,7 @@ Future<void> _pickOrCaptureBlueprint() async {
 
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: severity,
+                  initialValue: severity,
                   items: kSeverityOptions.map((s) =>
                     DropdownMenuItem(value: s, child: Text(s))
                   ).toList(),
@@ -752,7 +764,7 @@ Future<void> _pickOrCaptureBlueprint() async {
 
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: defectType,
+                  initialValue: defectType,
                   items: kDefectTypes.map((s) =>
                     DropdownMenuItem(value: s, child: Text(s))
                   ).toList(),
@@ -764,7 +776,7 @@ Future<void> _pickOrCaptureBlueprint() async {
 
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: repairMethod,
+                  initialValue: repairMethod,
                   items: kRepairMethods.map((s) =>
                     DropdownMenuItem(value: s, child: Text(s))
                   ).toList(),
@@ -858,11 +870,11 @@ Future<bool> _confirmSaveWithDefaults() async {
           appBar: AppBar(
       title: Text('Tap to Tag — ${_entry.site}'),
       actions: [
-        IconButton(
+       /* IconButton(
           tooltip: _entry.blueprintImagePath == null ? 'Add blueprint' : 'Replace blueprint',
           icon: const Icon(Icons.image_outlined),
           onPressed: _pickOrCaptureBlueprint,
-        ),
+        ), */
       ],
     ),
      body: SafeArea(           
@@ -892,31 +904,33 @@ Future<bool> _confirmSaveWithDefaults() async {
 
           // We'll draw the blueprint "contain" inside the available box.
           // For simplicity here we just use the whole area; InteractiveViewer will handle zoom/pan.
+     final blueprintChild = hasBlueprint
+            ? Image.file(
+                File(_entry.blueprintImagePath!),
+                key: ValueKey(_entry.blueprintImagePath ?? DateTime.now().millisecondsSinceEpoch), // Use a unique key based on time to force rebuild
+                fit: BoxFit.contain,
+              )
+            : Container(
+                color: const Color(0xFFF5F6FA),
+                alignment: Alignment.center,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'No blueprint yet.\nYou can still place pins.\n\nAdd a blueprint for better context.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.black54),
+                    ),
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.add_photo_alternate),
+                      label: const Text('Add Blueprint'),
+                      onPressed: _pickOrCaptureBlueprint,
+                    ),
+                  ],
+                ),
+              ); 
 
-
-          final blueprintChild = hasBlueprint
-                    ? Image.file(File(_entry.blueprintImagePath!), key: ValueKey(_entry.blueprintImagePath), // busts image cache on path change
-                     fit: BoxFit.contain)
-                    : Container(
-                        color: const Color(0xFFF5F6FA),
-                        alignment: Alignment.center,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text(
-                              'No blueprint yet.\nYou can still place pins.\n\nAdd a blueprint for better context.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: Colors.black54),
-                            ),
-                            const SizedBox(height: 12),
-                            FilledButton.icon(
-                              icon: const Icon(Icons.add_photo_alternate),
-                              label: const Text('Add Blueprint'),
-                              onPressed: _pickOrCaptureBlueprint,
-                            ),
-                          ],
-                        ),
-                      );
 
          return Column(
   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1012,40 +1026,56 @@ Future<bool> _confirmSaveWithDefaults() async {
                                   ),
                                 ),
 
-                              // pins
                               ..._pins.asMap().entries.map((e) {
-                                final i = e.key;
-                                final pin = e.value;
-                                final px = pin.nx * imgW;
-                                final py = pin.ny * imgH;
+                                  final i = e.key;
+                                  final pin = e.value;
+                                  final px = pin.nx * imgW;
+                                  final py = pin.ny * imgH;
 
-                                return Positioned(
-                                  left: px - 16,
-                                  top: py - 32,
-                                  child: GestureDetector(
-                                    onTap: () => _openPinSheet(i),
-                                    onLongPress: () => _onLongPressPin(i),
-                                    child: Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        const Icon(Icons.location_on, size: 36, color: Colors.red),
-                                        Container(
-                                          margin: const EdgeInsets.only(top: 10),
-                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white,
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            pin.label,
-                                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                  return Positioned(
+                                        left: px - 16,
+                                        top: py - 32,
+                                        child: GestureDetector(
+                                          onTap: () => _openPinSheet(i),
+                                         // onLongPress: () => _onLongPressPin(i),
+                                          onPanUpdate: (details) {
+                                            // Handle dragging the pin
+                                            setState(() {
+                                              final newX = (details.localPosition.dx / imgW).clamp(0.0, 1.0); // Calculate relative X position
+                                              final newY = (details.localPosition.dy / imgH).clamp(0.0, 1.0); // Calculate relative Y position
+                                              _pins[i].nx = newX;
+                                              _pins[i].ny = newY;
+                                            });
+                                          },
+                                          onPanEnd: (details) {
+                                            // Finalize the drag position
+                                            setState(() {
+                                              _pins[i].nx = (_draggingOffset.dx / imgW).clamp(0.0, 1.0);
+                                              _pins[i].ny = (_draggingOffset.dy / imgH).clamp(0.0, 1.0);
+                                            });
+                                          },
+                                          child: Stack(
+                                            alignment: Alignment.center,
+                                            children: [
+                                              const Icon(Icons.location_on, size: 36, color: Colors.red),
+                                              Container(
+                                                margin: const EdgeInsets.only(top: 10),
+                                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white,
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  _pins[i].label,
+                                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              }),
+                                      );
+
+                                }),
                             ],
                           ),
                         ),

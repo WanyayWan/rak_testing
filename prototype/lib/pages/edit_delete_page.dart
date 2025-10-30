@@ -1,9 +1,21 @@
 // lib/pages/edit_delete_page.dart
+//
+// Lists all saved projects (from projects.json) and lets the user:
+// - OPEN a project → goes to LocationPage to manage its locations
+// - DELETE a project → removes from projects.json and deletes its on-disk folder
+//
+// File layout on disk (per project):
+// <docs>/data/projects.json                   ← list of ProjectEntry
+// <docs>/data/projects/<projectId>/          ← per-project folder (deleted on project delete)
+//   └─ locations/<locationId>/ (blueprint, tags.json, photos/...)
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p; 
 import 'package:path_provider/path_provider.dart';
+
+
 import 'create_page.dart';    // ProjectEntry model
 import 'location_page.dart';  //  open locations list for a project
 
@@ -17,12 +29,12 @@ class EditDeletePage extends StatefulWidget {
 
 class _EditDeletePageState extends State<EditDeletePage> {
   final List<ProjectEntry> _entries = [];
-  bool _loading = true;
+  bool _loading = true; // simple loading flag for first render
 
   @override
   void initState() {
     super.initState();
-    _loadEntries();
+    _loadEntries(); // read projects.json → _entries
   }
 
   Future<File> _entriesFile() async {
@@ -31,7 +43,7 @@ class _EditDeletePageState extends State<EditDeletePage> {
     await file.parent.create(recursive: true);
     return file;
   }
-
+// Load ProjectEntry list from projects.json
   Future<void> _loadEntries() async {
     try {
       final file = await _entriesFile();
@@ -52,7 +64,7 @@ class _EditDeletePageState extends State<EditDeletePage> {
       if (mounted) setState(() => _loading = false);
     }
   }
-
+// Persist current _entries back to projects.json
   Future<void> _saveEntries() async {
     try {
       final file = await _entriesFile();
@@ -62,7 +74,7 @@ class _EditDeletePageState extends State<EditDeletePage> {
       debugPrint('Save entries failed: $e');
     }
   }
-
+// Delete the project's on-disk folder (locations, photos, blueprints, pins)
   Future<void> _deleteProjectFolder(String id) async {
     try {
       final docs = await getApplicationDocumentsDirectory();
@@ -75,6 +87,7 @@ class _EditDeletePageState extends State<EditDeletePage> {
     }
   }
 
+  // Ask for confirmation before deleting a project
   Future<void> _confirmDelete(ProjectEntry entry) async {
     final ok = await showDialog<bool>(
       context: context,
@@ -104,13 +117,14 @@ class _EditDeletePageState extends State<EditDeletePage> {
     );
   }
 
+ // Open the per-project LocationPage (manage locations under this site)
   Future<void> _openLocations(ProjectEntry entry) async {
-    // Go to LocationPage for this project (manage locations under the site)
+   
     await Navigator.pushNamed(context, LocationPage.route, arguments: entry);
-    // If you ever allow editing project meta on LocationPage and want to refresh this list, call:
-    // await _loadEntries();
+
   }
 
+//--> UI
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -136,7 +150,6 @@ class _EditDeletePageState extends State<EditDeletePage> {
                         [
                           if (e.location.isNotEmpty) e.location,
                           if (e.remarks.isNotEmpty) 'Remarks: ${e.remarks}',
-                          // you could also load and show a locations count here if desired
                         ].join('\n'),
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,

@@ -14,12 +14,12 @@ class HomePage extends StatelessWidget {    // stateless widget as no state to m
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-      /*  decoration: const BoxDecoration(
-           image: DecorationImage(
-            image: AssetImage('assets/images/background.jpg'),
+    decoration: const BoxDecoration(
+          /*     image: DecorationImage(
+            image: AssetImage('assets/images/RAK_logo.png'),
             fit: BoxFit.cover,
-          ), 
-        ),*/
+          ), */
+        ), 
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -42,18 +42,18 @@ class HomePage extends StatelessWidget {    // stateless widget as no state to m
                   ),
                   child: Column(
                   children:  const [
-                    /*   Image(
-                        image: AssetImage('assets/images/logo.png'),
-                        height: 60,
-                      ),  */
+                       Image(
+                        image: AssetImage('assets/images/RAK_logo.png'),
+                        height: 120,
+                      ),  
                   //    SizedBox(height: 8),
-                      Text(
+                   /*   Text(
                         'R.A.K. MATERIALS CONSULTANTS\nPTE. LTD.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blue,
                         ),
-                      ),
+                      ), */
                     ],
                   ),
                 ),

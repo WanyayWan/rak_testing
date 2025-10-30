@@ -1,4 +1,7 @@
 // lib/pages/location_page.dart
+// Manages the list of "locations" for a single project (e.g., floors/rooms)
+
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -14,7 +17,10 @@ class LocationLabel {
 
   LocationLabel({required this.id, required this.name});
 
+  // JSON serialization
   Map<String, dynamic> toJson() => {'id': id, 'name': name};
+  //the keyword factory is used to define a special kind of constructor —
+  //one that can control what gets returned when you create an object.
   factory LocationLabel.fromJson(Map<String, dynamic> m) =>
       LocationLabel(id: (m['id'] as String?) ?? '', name: (m['name'] as String?) ?? '');
 }
@@ -29,9 +35,10 @@ class LocationPage extends StatefulWidget {
 
 class _LocationPageState extends State<LocationPage> {
   late final ProjectEntry _entry;
-  bool _initialized = false;
+  bool _initialized = false;  
 
-  final List<LocationLabel> _locations = [];
+  final List<LocationLabel> _locations = []; // in-memory list for UI
+  // later this list will be used to save/load from disk and display
   late Future<Directory> _projectDirFuture;
 
   @override
@@ -40,8 +47,13 @@ class _LocationPageState extends State<LocationPage> {
     if (_initialized) return;
     _initialized = true;
 
+    //ProjectEntry passed via Navigator
     _entry = ModalRoute.of(context)!.settings.arguments as ProjectEntry;
+
+    // Ensure project directory exists
     _projectDirFuture = _ensureProjectDir(_entry.id);
+
+    // Load existing locations
     _loadLocations();
   }
 
@@ -84,7 +96,7 @@ class _LocationPageState extends State<LocationPage> {
       debugPrint('Save locations failed: $e');
     }
   }
-
+/*
 Future<void> _renameLocation(LocationLabel loc) async {
   final ctrl = TextEditingController(text: loc.name);
   final newName = await showDialog<String>(
@@ -110,7 +122,7 @@ Future<void> _renameLocation(LocationLabel loc) async {
   if (i < 0) return;
   setState(() => _locations[i] = LocationLabel(id: loc.id, name: newName));
   await _saveLocations();
-}
+}  */
 
 void _openLocation(LocationLabel loc) {
   Navigator.pushNamed(
@@ -135,6 +147,7 @@ Future<void> _addLocation() async {
 
   // go to details to enter the name there; expect a String name on pop
   final result = await Navigator.pushNamed(
+    
     context,
     DetailsPage.route,
     arguments: {
@@ -149,7 +162,7 @@ Future<void> _addLocation() async {
     setState(() => _locations.add(loc));
     await _saveLocations();
   } else {
-    // user backed out without saving -> optional: clean up the empty folder
+    // user backed out without saving ->  clean up the empty folder
     if (await locDir.exists()) {
       try { await locDir.delete(recursive: true); } catch (_) {}
     }
@@ -181,7 +194,7 @@ Future<void> _addLocation() async {
   setState(() => _locations.removeWhere((e) => e.id == loc.id));
   await _saveLocations();
 }
-
+// Edit a location by navigating to DetailsPage and accepting an updated name on return
 Future<void> _editLocation(LocationLabel loc) async {
   final result = await Navigator.pushNamed(
     context,
@@ -201,45 +214,61 @@ Future<void> _editLocation(LocationLabel loc) async {
     }
   }
 }
-
+  // -------- UI --------
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
+    return Scaffold
+    (
+      appBar: AppBar
+      (
         title: Text('Locations — ${_entry.site}'),
       ),
-      body: SafeArea(
+      body: SafeArea
+      (
+        // Showing message for no locations
         child: _locations.isEmpty
-            ? Center(
-                child: Padding(
+            ? Center
+            (
+                child: Padding
+                (
                   padding: const EdgeInsets.all(24),
-                  child: Text(
+                  child: Text
+                  (
                     'No locations yet.\nTap the + button to add your first level/room.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
-              )
-            : ListView.separated(
+            )
+            // If locations exist, show them in a list
+            : ListView.separated
+            (
                 padding: const EdgeInsets.all(12),
                 itemCount: _locations.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 6),
-                itemBuilder: (_, i) {
-                  final loc = _locations[i];
-                  return Card(
+                separatorBuilder: (_, __) => const SizedBox(height: 6), //adding a space between cards
+                //_ means we are ignoring the context parameter
+                itemBuilder: (_, i) 
+                {
+                final loc = _locations[i];
+                  return Card
+                  (
                     child: ListTile(
-                      title: Text(loc.name),
-                      subtitle: Text('ID: ${loc.id}'),
-                      onTap: () => _openLocation(loc),
-                      trailing: Row(
+                    title: Text(loc.name),
+                    subtitle: Text('ID: ${loc.id}'),
+                    onTap: () => _openLocation(loc),
+                    trailing: Row
+                          (
                             mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
+                            children: 
+                            [
+                              IconButton
+                              (
                                 icon: const Icon(Icons.edit_outlined),
                                 tooltip: 'Edit',
                                 onPressed: () => _editLocation(loc),
                               ),
-                              IconButton(
+                              IconButton
+                              (
                                 icon: const Icon(Icons.delete_outline),
                                 tooltip: 'Delete',
                                 onPressed: () => _deleteLocation(loc),
@@ -252,11 +281,14 @@ Future<void> _editLocation(LocationLabel loc) async {
                 },
               ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-  onPressed: _addLocation,            // <-- just call your helper
-  icon: const Icon(Icons.add),
-  label: const Text('Create new label'),
-),
+
+  //Floating action button to add a new location
+      floatingActionButton: FloatingActionButton.extended
+      (
+          onPressed: _addLocation,            // <-- just call your helper
+          icon: const Icon(Icons.add),
+          label: const Text('Create new label'),
+      ),
 
     );
   }
