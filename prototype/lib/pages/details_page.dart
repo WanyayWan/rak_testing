@@ -149,7 +149,7 @@ const List<String> kRepairMethods = <String>[
   '13',
   'NA',
 ];
-Offset _draggingOffset = Offset.zero; // To track the current dragging offset
+//Offset _draggingOffset = Offset.zero; // To track the current dragging offset
 
 // ---------- Page ----------
 
@@ -169,6 +169,7 @@ class _DetailsPageState extends State<DetailsPage> {
   final _metaFormKey = GlobalKey<FormState>(); // that identifies the form for validation
   final _locCtrl = TextEditingController(); //  text controller for location field
   final _remarksCtrl = TextEditingController();   // text controller for remarks field
+  final _pinStackKey = GlobalKey();
   DateTime? _date; // required
 
  // Size? _imgDrawnSize; // the size the blueprint is drawn at (for tap mapping)
@@ -545,55 +546,88 @@ Future<void> _pickOrCaptureBlueprint() async {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                            Row(
-              children: [
-                Text('Pin ${_pins[index].label}  •  Defects: ${pin.defects.length}',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.edit),
-                  tooltip: 'Rename pin',
-                  onPressed: () async {
-                    final newLabel = await showDialog<String>(
-                      context: context,
-                      builder: (_) {
-                        final ctrl = TextEditingController(text: _pins[index].label);
-                        return AlertDialog(
-                          title: const Text('Rename pin'),
-                          content: TextField(
-                            controller: ctrl,
-                            decoration: const InputDecoration(
-                              labelText: 'Label (e.g., A3)',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                          actions: [
-                            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-                            FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('Save')),
-                          ],
-                        );
-                      },
-                    );
-                    if (newLabel != null && newLabel.isNotEmpty) {
-                      setState(() => _pins[index].label = newLabel);
-                      setModal(() {});       // refresh the sheet UI
-                      await _savePins();     // persist change
-                    }
-                  },
+                         Row(
+  children: [
+    Text(
+      'Pin ${_pins[index].label}  •  Defects: ${pin.defects.length}',
+      style: const TextStyle(fontWeight: FontWeight.bold),
+    ),
+    const Spacer(),
+    IconButton(
+      icon: const Icon(Icons.edit),
+      tooltip: 'Rename pin',
+      onPressed: () async {
+        final newLabel = await showDialog<String>(
+          context: context,
+          builder: (_) {
+            final ctrl = TextEditingController(text: _pins[index].label);
+            return AlertDialog(
+              title: const Text('Rename pin'),
+              content: TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                  labelText: 'Label (e.g., A3)',
+                  border: OutlineInputBorder(),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.add_photo_alternate),
-                  tooltip: 'Add defect',
-                  onPressed: () async {
-                    final d = await _captureAndAnnotateDefect();
-                    if (d == null) return;
-                    setState(() => _pins[index].defects.add(d));
-                    setModal(() {});
-                    await _savePins();
-                  },
-                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('Save')),
               ],
+            );
+          },
+        );
+        if (newLabel != null && newLabel.isNotEmpty) {
+          setState(() => _pins[index].label = newLabel);
+          setModal(() {});       // refresh the sheet UI
+          await _savePins();     // persist change
+        }
+      },
+    ),
+    IconButton(
+      icon: const Icon(Icons.add_photo_alternate),
+      tooltip: 'Add defect',
+      onPressed: () async {
+        final d = await _captureAndAnnotateDefect();
+        if (d == null) return;
+        setState(() => _pins[index].defects.add(d));
+        setModal(() {});
+        await _savePins();
+      },
+    ),
+    // NEW: Delete Pin button
+    IconButton(
+      icon: const Icon(Icons.delete, color: Colors.red),
+      tooltip: 'Delete pin',
+      onPressed: () async {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Delete pin?'),
+            content: const Text(
+              'This removes the pin and its defect links (photos remain on disk).'
             ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+            ],
+          ),
+        );
+        if (ok == true) {
+          setState(() => _pins.removeAt(index));
+          await _savePins();
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).pop(); // close the bottom sheet
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Pin deleted'))
+          );
+        }
+      },
+    ),
+  ],
+),
+
                 const SizedBox(height: 8),
                 ...pin.defects.asMap().entries.map((e) {
                   final i = e.key;
@@ -884,7 +918,7 @@ Future<bool> _confirmSaveWithDefaults() async {
       right: true,
       child: LayoutBuilder(
         builder: (context, box) {
-          final boxSize = Size(box.maxWidth, box.maxHeight);
+      //    final boxSize = Size(box.maxWidth, box.maxHeight);
           // Compute drawn image size for BoxFit.contain
          /* if (_imagePixels != null) {
             final fitted = applyBoxFit(BoxFit.contain, _imagePixels!, boxSize);
@@ -898,9 +932,9 @@ Future<bool> _confirmSaveWithDefaults() async {
           //_fittedTopLeft = Offset.zero;
           } */
 
-          final dateLabel = _date == null
-            ? 'Select date'
-            : '${_date!.day}/${_date!.month}/${_date!.year}';
+    //      final dateLabel = _date == null
+         //   ? 'Select date'
+          //  : '${_date!.day}/${_date!.month}/${_date!.year}';
 
           // We'll draw the blueprint "contain" inside the available box.
           // For simplicity here we just use the whole area; InteractiveViewer will handle zoom/pan.
@@ -993,6 +1027,7 @@ Future<bool> _confirmSaveWithDefaults() async {
                             await _savePins();
                           },
                           child: Stack(
+                            key: _pinStackKey,
                             children: [
                               if (hasBlueprint)
                                 Image.file(
@@ -1036,43 +1071,43 @@ Future<bool> _confirmSaveWithDefaults() async {
                                         left: px - 16,
                                         top: py - 32,
                                         child: GestureDetector(
+                                          behavior: HitTestBehavior.translucent,
                                           onTap: () => _openPinSheet(i),
-                                         // onLongPress: () => _onLongPressPin(i),
+
+                                          // Optional: keep long-press inert so it never triggers deletion logic
+                                          onLongPress: () {},
+
                                           onPanUpdate: (details) {
-                                            // Handle dragging the pin
+                                            // Convert finger coords to the Stack’s local space (fixed frame)
+                                            final box = _pinStackKey.currentContext?.findRenderObject() as RenderBox?;
+                                            if (box == null) return;
+
+                                            final local = box.globalToLocal(details.globalPosition);
+
+                                            // Clamp to the drawn image area (Stack is imgW x imgH)
+                                            final clampedX = local.dx.clamp(0.0, imgW);
+                                            final clampedY = local.dy.clamp(0.0, imgH);
+
                                             setState(() {
-                                              final newX = (details.localPosition.dx / imgW).clamp(0.0, 1.0); // Calculate relative X position
-                                              final newY = (details.localPosition.dy / imgH).clamp(0.0, 1.0); // Calculate relative Y position
-                                              _pins[i].nx = newX;
-                                              _pins[i].ny = newY;
+                                              _pins[i].nx = (clampedX / imgW).toDouble();
+                                              _pins[i].ny = (clampedY / imgH).toDouble();
                                             });
                                           },
-                                          onPanEnd: (details) {
-                                            // Finalize the drag position
-                                            setState(() {
-                                              _pins[i].nx = (_draggingOffset.dx / imgW).clamp(0.0, 1.0);
-                                              _pins[i].ny = (_draggingOffset.dy / imgH).clamp(0.0, 1.0);
-                                            });
+
+                                          onPanEnd: (_) async {
+                                            // Don’t recompute from _draggingOffset—just persist
+                                            await _savePins();
                                           },
+
                                           child: Stack(
                                             alignment: Alignment.center,
                                             children: [
                                               const Icon(Icons.location_on, size: 36, color: Colors.red),
-                                              Container(
-                                                margin: const EdgeInsets.only(top: 10),
-                                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.white,
-                                                  borderRadius: BorderRadius.circular(4),
-                                                ),
-                                                child: Text(
-                                                  _pins[i].label,
-                                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)
-                                                ),
-                                              ),
+                                              // ... label chip
                                             ],
                                           ),
                                         ),
+
                                       );
 
                                 }),

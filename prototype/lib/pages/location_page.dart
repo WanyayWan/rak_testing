@@ -260,14 +260,8 @@ Future<void> _editLocation(LocationLabel loc) async {
                           (
                             mainAxisSize: MainAxisSize.min,
                             children: 
-                            [
-                              IconButton
-                              (
-                                icon: const Icon(Icons.edit_outlined),
-                                tooltip: 'Edit',
-                                onPressed: () => _editLocation(loc),
-                              ),
-                              IconButton
+                            [                       
+                            IconButton
                               (
                                 icon: const Icon(Icons.delete_outline),
                                 tooltip: 'Delete',
@@ -287,7 +281,7 @@ Future<void> _editLocation(LocationLabel loc) async {
       (
           onPressed: _addLocation,            // <-- just call your helper
           icon: const Icon(Icons.add),
-          label: const Text('Create new label'),
+          label: const Text('Create Location'),
       ),
 
     );

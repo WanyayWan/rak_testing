@@ -2,10 +2,8 @@
 import 'dart:convert'; // for JSON encoding/decoding
 import 'dart:io'; // for File and Directory operations
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p; // for path operations
 import 'package:path_provider/path_provider.dart'; // to get app document directory
-import 'package:pdf/widgets.dart' as pw;
 //import 'details_page.dart';
 import 'location_page.dart';
 
@@ -213,7 +211,7 @@ class _CreatePageState extends State<CreatePage> {
     
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create Page'),
+        title: const Text('Create Project'),
         backgroundColor: const Color(0xFF1A237E),
         foregroundColor: Colors.white,
       ),

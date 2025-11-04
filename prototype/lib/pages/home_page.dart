@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import '../widgets/menu_button.dart';
 import 'create_page.dart';
 import 'package:prototype/pages/edit_delete_page.dart';
+import 'dart:io' show Platform;
+import 'package:flutter/services.dart';
 
 
 class HomePage extends StatelessWidget {    // stateless widget as no state to manage 
@@ -77,22 +79,42 @@ class HomePage extends StatelessWidget {    // stateless widget as no state to m
                 const SizedBox(height: 16),
 
                 MenuButton(
-                  label: 'EXIT',
-                  onPressed: () {
-                    // e.g., show confirm dialog
-                    showDialog(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                        title: const Text('Exit'),
-                        content: const Text('Close the app?'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-                          TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
-                        ],
-                      ),
-                    );
-                  },
-                ),
+  label: 'EXIT',
+  onPressed: () async {
+    final shouldExit = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Exit'),
+        content: const Text('Close the app?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldExit == true) {
+      // Close the app (Android). On iOS, exiting programmatically is discouraged.
+      if (Platform.isAndroid) {
+        SystemNavigator.pop(); // preferred over exit(0)
+      } else if (Platform.isIOS) {
+        // Apple discourages forced exit; if you really need it for internal builds:
+        // import 'dart:io' and uncomment next line (may be rejected by App Review)
+        // exit(0);
+        SystemNavigator.pop(); // often just backgrounds the app on iOS
+      } else {
+        SystemNavigator.pop();
+      }
+    }
+  },
+)
+,
 
                 const Spacer(),
 
