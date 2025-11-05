@@ -25,14 +25,22 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
   late final ImagePainterController _controller;
   bool _isSaving = false;
 
-  // NEW: keep a downscaled image in memory for fast interaction
+  int _pointerCount = 0;
+
+  // keep a downscaled image in memory for fast interaction
   Uint8List? _previewBytes;
+
+  PaintMode _currentMode  = PaintMode.rect;
 
   @override
   void initState() {
     super.initState();
     _controller = ImagePainterController()..setMode(PaintMode.rect);
-
+     _controller.addListener(() {
+    setState(() {
+      _currentMode = _controller.mode;
+    });
+  });
     // Prepare a smaller, screen-friendly bitmap once up-front
     _preparePreview(); // <-- new
   }
@@ -42,7 +50,7 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
     final originalBytes = await File(widget.imagePath).readAsBytes();
 
     // Decode and scale to ~1440px width (keeps aspect)
-    const targetWidth = 1440; // tweak as you like (1080–1600 is a good range)
+    const targetWidth = 1440; 
     final codec = await ui.instantiateImageCodec(
       originalBytes,
       targetWidth: targetWidth,
@@ -116,24 +124,45 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
         ],
       ),
 
-      // CHANGED: use ImagePainter.memory with the downscaled preview
-      body: _previewBytes == null
-          ? const Center(child: CircularProgressIndicator())
-          : ImagePainter.memory(
-              _previewBytes!,
-              controller: _controller,
-              scalable: true,
-              showControls: true,
-              controlsAtTop: true,
-              colors: const [
-                Colors.red,
-                Colors.green,
-                Colors.blue,
-                Colors.yellow,
-                Colors.black,
-                Colors.white,
-              ],
+       body: _previewBytes == null
+  ? const Center(child: CircularProgressIndicator())
+  : Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => setState(() => _pointerCount++),
+      onPointerUp:   (_) => setState(() => _pointerCount = (_pointerCount - 1).clamp(0, 10)),
+      onPointerCancel: (_) => setState(() => _pointerCount = (_pointerCount - 1).clamp(0, 10)),
+      child: Stack(
+        children: [
+          // ImagePainter keeps its own zoom tool & toolbar
+          ImagePainter.memory(
+            _previewBytes!,
+            controller: _controller,
+            scalable: true,        // keep this TRUE so the built-in Zoom tool works
+            showControls: true,
+            controlsAtTop: true,
+            colors: const [
+              Colors.red, Colors.green, Colors.blue,
+              Colors.yellow, Colors.black, Colors.white,
+            ],
+          ),
+
+          // NEW: transparent overlay that EATS pinch gestures unless Zoom tool is active
+          if (_pointerCount >= 2 && _currentMode != PaintMode.none)
+            Positioned.fill(
+              child: GestureDetector(
+                // Capture the gesture so it never reaches ImagePainter.
+                onScaleStart: (_) {},
+                onScaleUpdate: (_) {},
+                onScaleEnd: (_) {},
+                // Make sure this actually takes the events:
+                behavior: HitTestBehavior.opaque,
+              ),
             ),
+        ],
+      ),
+    ),
+
+
     );
   }
 }
