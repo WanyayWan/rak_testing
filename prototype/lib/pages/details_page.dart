@@ -27,6 +27,22 @@ class Defect {
     required this.repairMethod,
     required this.note,
   });
+    Defect copyWith({
+    String? photoPath,
+    String? severity,
+    String? defectType,
+    String? repairMethod,
+    String? note,
+  }) {
+    return Defect(
+      photoPath: photoPath ?? this.photoPath,
+      severity: severity ?? this.severity,
+      defectType: defectType ?? this.defectType,
+      repairMethod: repairMethod ?? this.repairMethod,
+      note: note ?? this.note,
+    );
+  }
+
 
   Map<String, dynamic> toJson() => { // building a map for json encoding
     'photoPath': photoPath,
@@ -226,6 +242,148 @@ void didChangeDependencies() {
   _loadPins();
   _loadMeta();
   _ensureImagePixels();
+}
+
+ Future<void> _editDefect(int pinIndex, int defectIndex) async {
+  final d = _pins[pinIndex].defects[defectIndex];
+
+  String? severity  = _coerceOrNull(d.severity, kSeverityOptions);
+  String? defectType = _coerceOrNull(d.defectType, kDefectTypes);
+  String? repairMethod = _coerceOrNull(d.repairMethod, kRepairMethods);
+  final noteCtrl = TextEditingController(text: d.note);
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (sheetCtx) {
+      return StatefulBuilder(
+        builder: (ctx, setModal) {
+          final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+          final sysPad = MediaQuery.of(ctx).viewPadding;
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 16, right: 16,
+              top: 16 + sysPad.top,
+              bottom: 16 + sysPad.bottom + bottomInset,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Edit defect', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+
+                  if (File(d.photoPath).existsSync())
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(File(d.photoPath), height: 160, fit: BoxFit.cover),
+                    ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.brush),
+                    label: const Text('Re-annotate photo'),
+                    onPressed: () async {
+                      final String? savedPath = await Navigator.push<String>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AnnotatePhotoPage(
+                            imagePath: d.photoPath,
+                            finalSavePath: d.photoPath, // overwrite same file
+                          ),
+                        ),
+                      );
+                      if (savedPath != null) {
+                        setModal(() {});
+                        await precacheImage(FileImage(File(savedPath)), context);
+                      }
+                    },
+                  ),
+
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: severity,
+                    items: kSeverityOptions.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                    onChanged: (v) => setModal(() => severity = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Severity', border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: defectType,
+                    items: kDefectTypes.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                    onChanged: (v) => setModal(() => defectType = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Defect type', border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: repairMethod,
+                    items: kRepairMethods.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                    onChanged: (v) => setModal(() => repairMethod = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Repair method', border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: noteCtrl,
+                    minLines: 1, maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Note', border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () async {
+                      final sv = (severity ?? 'General View');
+                      final dt = (defectType ?? 'Damaged element');
+                      final rm = (repairMethod ?? 'NA');
+                      final n  = noteCtrl.text.trim().isEmpty
+                          ? 'No remarks provided'
+                          : noteCtrl.text.trim();
+
+                      setState(() {
+                        _pins[pinIndex].defects[defectIndex] = Defect(
+                          photoPath: d.photoPath,
+                          severity: sv,
+                          defectType: dt,
+                          repairMethod: rm,
+                          note: n,
+                        );
+                      });
+                      await _savePins();
+                      if (Navigator.of(sheetCtx).canPop()) Navigator.of(sheetCtx).pop();
+                    },
+                    child: const Text('Save changes'),
+                  ),
+
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+
+  noteCtrl.dispose();
+}
+
+// Helper function — add this near bottom of class
+String? _coerceOrNull(String? v, List<String> options) {
+  if (v == null) return null;
+  final t = v.trim();
+  return options.contains(t) ? t : null;
 }
 
  Future<Directory> _ensureLocationDir(String projectId, String locationId) async {
@@ -527,184 +685,177 @@ Future<void> _pickOrCaptureBlueprint() async {
 
   // Tapping a pin opens its defect list (bottom sheet) with add/delete
   void _openPinSheet(int index) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      builder: (_) {
-        final pin = _pins[index];
-        return StatefulBuilder(builder: (ctx, setModal) {
-          final sys = MediaQuery.of(ctx).viewPadding;
-          final kb  = MediaQuery.of(ctx).viewInsets.bottom;
-          return Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 16 + sys.top,            // avoid status bar / cutouts
-              bottom: 16 + sys.bottom + kb, // avoid gesture bar + keyboard
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                         Row(
-  children: [
-    Text(
-      'Pin ${_pins[index].label}  •  Defects: ${pin.defects.length}',
-      style: const TextStyle(fontWeight: FontWeight.bold),
-    ),
-    const Spacer(),
-    IconButton(
-      icon: const Icon(Icons.edit),
-      tooltip: 'Rename pin',
-      onPressed: () async {
-        final newLabel = await showDialog<String>(
-          context: context,
-          builder: (_) {
-            final ctrl = TextEditingController(text: _pins[index].label);
-            return AlertDialog(
-              title: const Text('Rename pin'),
-              content: TextField(
-                controller: ctrl,
-                decoration: const InputDecoration(
-                  labelText: 'Label (e.g., A3)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-                FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('Save')),
-              ],
-            );
-          },
-        );
-        if (newLabel != null && newLabel.isNotEmpty) {
-          setState(() => _pins[index].label = newLabel);
-          setModal(() {});       // refresh the sheet UI
-          await _savePins();     // persist change
-        }
-      },
-    ),
-    IconButton(
-      icon: const Icon(Icons.add_photo_alternate),
-      tooltip: 'Add defect',
-      onPressed: () async {
-        final d = await _captureAndAnnotateDefect();
-        if (d == null) return;
-        setState(() => _pins[index].defects.add(d));
-        setModal(() {});
-        await _savePins();
-      },
-    ),
-    // NEW: Delete Pin button
-    IconButton(
-      icon: const Icon(Icons.delete, color: Colors.red),
-      tooltip: 'Delete pin',
-      onPressed: () async {
-        final ok = await showDialog<bool>(
-          context: context,
-          builder: (_) => AlertDialog(
-            title: const Text('Delete pin?'),
-            content: const Text(
-              'This removes the pin and its defect links (photos remain on disk).'
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
-            ],
-          ),
-        );
-        if (ok == true) {
-          setState(() => _pins.removeAt(index));
-          await _savePins();
-          if (Navigator.of(context).canPop()) {
-            Navigator.of(context).pop(); // close the bottom sheet
-          }
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Pin deleted'))
-          );
-        }
-      },
-    ),
-  ],
-),
-
-                const SizedBox(height: 8),
-                ...pin.defects.asMap().entries.map((e) {
-                  final i = e.key;
-                  final d = e.value;
-                  return Card(
-                    child: ListTile(
-                      leading: File(d.photoPath).existsSync()
-                          ? Image.file(File(d.photoPath), width: 48, height: 48, fit: BoxFit.cover)
-                          : const Icon(Icons.broken_image),
-                      title: Text(d.severity),
-                      subtitle: Text(
-                        [
-                          if (d.defectType.isNotEmpty) 'Type: ${d.defectType}',
-                          if (d.repairMethod.isNotEmpty) 'Repair: ${d.repairMethod}',
-                          if (d.note.isNotEmpty) 'Note: ${d.note}',
-                        ].join('\n'),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    //  isThreeLine: true,
-                      trailing: IconButton(
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        onPressed: () async {
-                          setState(() => _pins[index].defects.removeAt(i));
-                          setModal(() {});
-                          await _savePins();
-                        },
-                      ),
-                      onTap: () {
-  showDialog(
+  showModalBottomSheet(
     context: context,
-    builder: (_) => Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      child: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(12),
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (_) {
+      final pin = _pins[index];
+      return StatefulBuilder(builder: (ctx, setModal) {
+        final sys = MediaQuery.of(ctx).viewPadding;
+        final kb  = MediaQuery.of(ctx).viewInsets.bottom;
+
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16 + sys.top,            // avoid status bar / cutouts
+            bottom: 16 + sys.bottom + kb, // avoid gesture bar + keyboard
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (File(d.photoPath).existsSync())
-                Image.file(File(d.photoPath), fit: BoxFit.contain),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  [
-                    'Severity: ${d.severity}',
-                    if (d.defectType.isNotEmpty) 'Type: ${d.defectType}',
-                    if (d.repairMethod.isNotEmpty) 'Repair: ${d.repairMethod}',
-                    if (d.note.isNotEmpty) 'Note: ${d.note}',
-                  ].join('\n'),
-                ),
+              // ---- Header row: title + actions ----
+              Row(
+                children: [
+                  Text(
+                    'Pin ${_pins[index].label}  •  Defects: ${pin.defects.length}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const Spacer(),
+
+                  // Rename pin
+                  IconButton(
+                    icon: const Icon(Icons.edit),
+                    tooltip: 'Rename pin',
+                    onPressed: () async {
+                      final newLabel = await showDialog<String>(
+                        context: context,
+                        builder: (_) {
+                          final ctrl = TextEditingController(text: _pins[index].label);
+                          return AlertDialog(
+                            title: const Text('Rename pin'),
+                            content: TextField(
+                              controller: ctrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Label (e.g., A3)',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                            actions: [
+                              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                              FilledButton(onPressed: () => Navigator.pop(context, ctrl.text.trim()), child: const Text('Save')),
+                            ],
+                          );
+                        },
+                      );
+                      if (newLabel != null && newLabel.isNotEmpty) {
+                        setState(() => _pins[index].label = newLabel);
+                        setModal(() {});       // refresh the sheet UI
+                        await _savePins();     // persist change
+                      }
+                    },
+                  ),
+
+                  // Add defect
+                  IconButton(
+                    icon: const Icon(Icons.add_photo_alternate),
+                    tooltip: 'Add defect',
+                    onPressed: () async {
+                      final d = await _captureAndAnnotateDefect();
+                      if (d == null) return;
+                      setState(() => _pins[index].defects.add(d));
+                      setModal(() {});
+                      await _savePins();
+                    },
+                  ),
+
+                  // Delete pin
+                  IconButton(
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    tooltip: 'Delete pin',
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: const Text('Delete pin?'),
+                          content: const Text('This removes the pin and its defect links (photos remain on disk).'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+                          ],
+                        ),
+                      );
+                      if (ok == true) {
+                        setState(() => _pins.removeAt(index));
+                        await _savePins();
+                        if (Navigator.of(context).canPop()) {
+                          Navigator.of(context).pop(); // close the bottom sheet
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Pin deleted'))
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
+
               const SizedBox(height: 8),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
+
+              // ---- Defect list ----
+              ...pin.defects.asMap().entries.map((e) {
+                final i = e.key;
+                final d = e.value;
+
+                return Card(
+                  child: ListTile(
+                    leading: File(d.photoPath).existsSync()
+                        ? Image.file(File(d.photoPath), width: 48, height: 48, fit: BoxFit.cover)
+                        : const Icon(Icons.broken_image),
+                    title: Text(d.severity),
+                    subtitle: Text(
+                      [
+                        if (d.defectType.isNotEmpty) 'Type: ${d.defectType}',
+                        if (d.repairMethod.isNotEmpty) 'Repair: ${d.repairMethod}',
+                        if (d.note.isNotEmpty) 'Note: ${d.note}',
+                      ].join('\n'),
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: Wrap(
+                      spacing: 4,
+                      children: [
+                        // EDIT defect
+                        IconButton(
+                          tooltip: 'Edit',
+                          icon: const Icon(Icons.edit),
+                          onPressed: () async {
+                            await _editDefect(index, i); // opens editor bottom sheet
+                            setModal(() {});             // refresh this sheet after returning
+                          },
+                        ),
+                        // DELETE defect
+                        IconButton(
+                          tooltip: 'Delete',
+                          icon: const Icon(Icons.close, color: Colors.red),
+                          onPressed: () async {
+                            setState(() => _pins[index].defects.removeAt(i));
+                            setModal(() {});
+                            await _savePins();
+                          },
+                        ),
+                      ],
+                    ),
+
+                    // Tap also opens the editor
+                    onTap: () async {
+                      await _editDefect(index, i);
+                      setModal(() {});
+                    },
+                  ),
+                );
+              }),
+
+              const SizedBox(height: 16),
             ],
           ),
-        ),
-      ),
-    ),
+        );
+      });
+    },
   );
-},
+}
 
-                    ),
-                  );
-                }),
-                const SizedBox(height: 16),
-              ],
-            ),
-          );
-        });
-      },
-    );
-  }
 
   // ---------- Defect capture + annotate + meta ----------
 
@@ -844,7 +995,7 @@ await precacheImage(FileImage(File(savedPath)), context);
                       if (!ok) return;
                       if (sv.isEmpty) sv = 'General View';
                       if (dt.isEmpty) dt = 'Other';
-                      if (rm.isEmpty) rm = 'Other';
+                      if (rm.isEmpty) rm = 'NA';
                     }
                     if (n.isEmpty) n = 'No remarks provided';
 
@@ -870,8 +1021,8 @@ if (result == null) return null;
         return Defect(
       photoPath: absPath,
       severity: result['severity'] ?? 'General View',
-      defectType: result['defectType'] ?? 'Other',
-      repairMethod: result['repairMethod'] ?? 'Other',
+      defectType: result['defectType'] ?? 'Damaged element',
+      repairMethod: result['repairMethod'] ?? 'NA',
       note: (result['note']?.trim().isEmpty ?? true) ? 'No remarks provided' : result['note']!.trim(),
     ) ;
   }

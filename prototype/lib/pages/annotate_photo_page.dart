@@ -44,6 +44,13 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
     // Prepare a smaller, screen-friendly bitmap once up-front
     _preparePreview(); // <-- new
   }
+  bool get _zoomEnabled {
+  // In image_painter, the “hand/zoom” tool maps to PaintMode.none.
+  // If your version uses a different enum for the hand tool (e.g., PaintMode.move),
+  // replace PaintMode.none below accordingly.
+  return _currentMode == PaintMode.none;
+}
+
 
   Future<void> _preparePreview() async {
     // Read original bytes
@@ -124,48 +131,27 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
         ],
       ),
 
-       body: _previewBytes == null
-  ? const Center(child: CircularProgressIndicator())
-  : Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerDown: (_) => setState(() => _pointerCount++),
-      onPointerUp:   (_) => setState(() => _pointerCount = (_pointerCount - 1).clamp(0, 10)),
-      onPointerCancel: (_) => setState(() => _pointerCount = (_pointerCount - 1).clamp(0, 10)),
-      child: Stack(
-        children: [
-          // ImagePainter keeps its own zoom tool & toolbar
-          ImagePainter.memory(
-            _previewBytes!,
-            controller: _controller,
-            scalable: true,        // keep this TRUE so the built-in Zoom tool works
-            showControls: true,
-            controlsAtTop: true,
-            colors: const [
-              Colors.red, Colors.green, Colors.blue,
-              Colors.yellow, Colors.black, Colors.white,
-            ],
-          ),
-
-          // NEW: transparent overlay that EATS pinch gestures unless Zoom tool is active
-          if (_pointerCount >= 2 && _currentMode != PaintMode.none)
-            Positioned.fill(
-              child: GestureDetector(
-                // Capture the gesture so it never reaches ImagePainter.
-                onScaleStart: (_) {},
-                onScaleUpdate: (_) {},
-                onScaleEnd: (_) {},
-                // Make sure this actually takes the events:
-                behavior: HitTestBehavior.opaque,
-              ),
-            ),
+      body: _previewBytes == null
+    ? const Center(child: CircularProgressIndicator())
+    : ImagePainter.memory(
+        _previewBytes!,
+        controller: _controller,
+        // ✅ Only allow pinch-to-zoom when the Zoom/Hand tool is active
+        scalable: _zoomEnabled,
+        showControls: true,
+        controlsAtTop: true,
+        colors: const [
+          Colors.red, Colors.green, Colors.blue,
+          Colors.yellow, Colors.black, Colors.white,
         ],
       ),
-    ),
+
 
 
     );
   }
 }
+
 
 // -------- helpers for compute (top-level) --------
 
