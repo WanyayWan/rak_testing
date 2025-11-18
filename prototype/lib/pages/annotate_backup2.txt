@@ -1,0 +1,427 @@
+  import 'dart:io';
+  import 'dart:typed_data';
+  import 'dart:ui' as ui;
+  import 'dart:convert';
+  import 'package:flutter/foundation.dart';
+  import 'package:flutter/material.dart';
+  import 'package:flutter_painter/flutter_painter.dart';
+  import 'package:path/path.dart' as p;
+
+  class AnnotatePhotoPage extends StatefulWidget {
+    static const route = '/anotate_photo';
+    final String imagePath;
+    final String? finalSavePath;
+
+    const AnnotatePhotoPage({
+      super.key,
+      required this.imagePath,
+      this.finalSavePath,
+    });
+
+    @override
+    State<AnnotatePhotoPage> createState() => _AnnotatePhotoPageState();
+  }
+
+  class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
+    late PainterController _controller;
+    ui.Image? _backgroundImage;
+
+    bool _isSaving = false;
+
+    @override
+    void initState() {
+      super.initState();
+
+      // Base controller with settings
+    _controller = PainterController(
+    settings: PainterSettings(
+      freeStyle: const FreeStyleSettings(mode: FreeStyleMode.none),
+      shape: ShapeSettings(
+        paint: Paint()
+          ..color = Colors.red
+          ..strokeWidth = 3
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round,
+        drawOnce: true,
+      ),
+      scale: const ScaleSettings(enabled: true, minScale: 0.5, maxScale: 8),
+      object: const ObjectSettings(                 // ✅ add this
+      mode: ObjectMode.transform,                 //   tap to select, move/resize
+    ),
+
+    ),
+  );
+
+      // Rebuild when history / selection / settings change
+      _controller.addListener(() {
+        if (mounted) setState(() {});
+      });
+
+      // Load background image
+      _initBackground();
+    }
+
+  Future<void> _initBackground() async {
+    final bytes = await File(widget.imagePath).readAsBytes();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    final img = frame.image;
+    BackgroundDrawable? bgDrawable;
+
+    setState(() {
+      _backgroundImage = img;
+      _controller.background = img.backgroundDrawable;
+      _controller.background = bgDrawable;
+      _controller.shapeFactory = RectangleFactory();
+    });
+
+    await _restoreVectors();                        // ✅ reload vectors
+    _controller.settings = _controller.settings.copyWith(
+      object: const ObjectSettings(mode: ObjectMode.transform),
+    );
+  }
+
+
+
+    @override
+    void dispose() {
+      _controller.dispose();
+      super.dispose();
+    }
+  String _annoJsonPath(String rasterPath) {
+    final dir = File(rasterPath).parent.path;
+    final base = p.basenameWithoutExtension(rasterPath);
+    return p.join(dir, '$base.rects.json');
+  }
+
+  Future<void> _saveVectors() async {
+    final list = <Map<String, dynamic>>[];
+
+    for (final d in _controller.drawables) {
+      if (d is! ShapeDrawable) continue;
+      final pos = d.position;
+      final size = d.size;
+      final paint = d.paint;
+
+      list.add({
+        't': 'rect',                         // type
+        'x': pos.dx,
+        'y': pos.dy,
+        'w': size.width,
+        'h': size.height,
+        'color': paint.color.value,          // int
+        'sw': paint.strokeWidth,             // double
+        'style': paint.style.index,          // 0=fill,1=stroke
+      });
+    }
+
+    final json = jsonEncode(list);
+    final f = File(_annoJsonPath(widget.imagePath));
+    await f.create(recursive: true);
+    await f.writeAsString(json);
+  }
+
+  Future<void> _restoreVectors() async {
+    final f = File(_annoJsonPath(widget.imagePath));
+    if (!await f.exists()) return;
+
+    final raw = await f.readAsString();
+    final List data = jsonDecode(raw);
+
+    final newShapes = <Drawable>[];
+
+    for (final e in data) {
+      final m = (e as Map).cast<String, dynamic>();
+      if (m['t'] != 'rect') continue;
+
+      final dx = (m['x'] as num).toDouble();
+      final dy = (m['y'] as num).toDouble();
+      final w  = (m['w'] as num).toDouble();
+      final h  = (m['h'] as num).toDouble();
+
+      final paint = Paint()
+        ..color = Color(m['color'] as int)
+        ..strokeWidth = (m['sw'] as num).toDouble()
+        ..style = PaintingStyle.values[(m['style'] as num).toInt()]
+        ..strokeCap = StrokeCap.round;
+
+      newShapes.add(
+        ShapeDrawable(
+          position: Offset(dx, dy),
+          size: Size(w, h),
+          paint: paint,
+          notify: false,
+        ),
+      );
+    }
+
+    if (newShapes.isNotEmpty) {
+      _controller.addDrawables(newShapes);  
+    }
+    
+  }
+
+  Future<void> _loadVectors() async {
+    if (_backgroundImage == null) return;
+
+    final jsonPath = _annoJsonPath(widget.finalSavePath ?? widget.imagePath);
+    final f = File(jsonPath);
+    if (!f.existsSync()) return;
+
+    late final Map<String, dynamic> data;
+    try {
+      data = (jsonDecode(await f.readAsString()) as Map).cast<String, dynamic>();
+    } catch (_) {
+      return;
+    }
+
+    final items = (data['items'] as List? ?? const []).cast<dynamic>();
+
+    final w = _backgroundImage!.width.toDouble();
+    final h = _backgroundImage!.height.toDouble();
+
+    for (final raw in items) {
+      final m = (raw as Map).cast<String, dynamic>();
+      if (m['type'] != 'rect') continue;
+
+      final x  = (m['x'] as num).toDouble() * w;
+      final y  = (m['y'] as num).toDouble() * h;
+      final rw = (m['w'] as num).toDouble() * w;
+      final rh = (m['h'] as num).toDouble() * h;
+
+      final paint = Paint()
+        ..color = Color((m['color'] as num).toInt())
+        ..strokeWidth = (m['stroke'] as num).toDouble()
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+
+      // Re-create the rectangle object so it is selectable/editable.
+      _controller.addDrawable(
+        ShapeDrawable(position: Offset(x, y), size: Size(rw, rh), paint: paint),
+        notify: false,
+      );
+    }
+    _controller.notifyListeners();  // single UI refresh
+  }
+
+    // ---------- Toolbar actions ----------
+
+    // Change color for NEW rectangles (and the selected one if any)
+  void _setShapeColor(Color color) {
+    final s = _controller.settings.shape;
+    final old = s.paint;
+
+    final newPaint = Paint()
+      ..color = color
+      ..strokeWidth = (old?.strokeWidth ?? 3)
+      ..style = (old?.style ?? PaintingStyle.stroke)
+      ..strokeCap = (old?.strokeCap ?? StrokeCap.round);
+
+    _controller.settings = _controller.settings.copyWith(
+      shape: s.copyWith(paint: newPaint),
+    );
+
+    final sel = _controller.selectedObjectDrawable;
+    if (sel is ShapeDrawable) {
+      final sp = sel.paint;
+      final updated = Paint()
+        ..color = color
+        ..strokeWidth = sp.strokeWidth
+        ..style = sp.style
+        ..strokeCap = sp.strokeCap;
+      _controller.replaceDrawable(sel, sel.copyWith(paint: updated));
+    }
+  }
+
+
+    // Delete currently selected rectangle (if any)
+    void _deleteSelected() {
+      final selected = _controller.selectedObjectDrawable;
+      if (selected != null) {
+        _controller.removeDrawable(selected);
+        _saveVectors();
+      }
+    }
+
+    // Clear all rectangles but keep the background image
+    void _clearAll() {
+      // Remove everything
+      _controller.clearDrawables();
+
+      // Re-add the background only
+      if (_backgroundImage != null) {
+        _controller.background = _backgroundImage!.backgroundDrawable;
+      }
+      _saveVectors();
+    }
+
+    Future<void> _export() async {
+      if (_isSaving || _backgroundImage == null) return;
+      setState(() => _isSaving = true);
+
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+      // tiny delay so dialog paints
+      await Future.delayed(const Duration(milliseconds: 16));
+
+      try {
+        final bgSize = Size(
+          _backgroundImage!.width.toDouble(),
+          _backgroundImage!.height.toDouble(),
+        );
+
+        final ui.Image rendered = await _controller.renderImage(bgSize);
+        final byteData =
+            await rendered.toByteData(format: ui.ImageByteFormat.png);
+        if (byteData == null) {
+          if (mounted) Navigator.of(context).pop(); // loader
+          return;
+        }
+        final bytes = byteData.buffer
+            .asUint8List(byteData.offsetInBytes, byteData.lengthInBytes);
+
+        final targetPath = widget.finalSavePath ?? _makeTempPngPath();
+        await compute(_writeBytesToPath, {'bytes': bytes, 'path': targetPath});
+        await _saveVectors();
+
+        if (!mounted) return;
+        Navigator.of(context).pop();                   // close loader
+        Navigator.of(context).pop<String>(targetPath); // return path
+      } catch (e) {
+        if (mounted) {
+          Navigator.of(context).pop(); // loader
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to export image: $e')),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isSaving = false);
+      }
+    }
+
+    @override
+    Widget build(BuildContext context) {
+      final bg = _backgroundImage;
+
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Annotate'),
+          actions: [
+            IconButton(
+              tooltip: 'Save',
+              icon: const Icon(Icons.check),
+              onPressed: _isSaving ? null : _export,
+            ),
+          ],
+        ),
+        body: bg == null
+            ? const Center(child: CircularProgressIndicator())
+            : Center(
+                child: AspectRatio(
+                  aspectRatio: bg.width / bg.height,
+                  child: FlutterPainter(
+                    controller: _controller,
+                  ),
+                ),
+              ),
+
+        // Toolbar for undo / clear / delete / colors
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              children: [
+                IconButton(
+                  tooltip: 'Undo',
+                  icon: const Icon(Icons.undo),
+                  onPressed:
+                      _controller.canUndo ? () => _controller.undo() : null,
+                ),
+                IconButton(
+                  tooltip: 'Redo',
+                  icon: const Icon(Icons.redo),
+                  onPressed:
+                      _controller.canRedo ? () => _controller.redo() : null,
+                ),
+                IconButton(
+                  tooltip: 'Clear all rectangles',
+                  icon: const Icon(Icons.layers_clear),
+                  onPressed: _clearAll,
+                ),
+                IconButton(
+                  tooltip: 'Delete selected',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: _controller.selectedObjectDrawable != null
+                      ? _deleteSelected
+                      : null,
+                ),
+                const SizedBox(width: 8),
+                // Color choices
+                Expanded(
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _ColorDot(color: Colors.red, onTap: _setShapeColor),
+                      _ColorDot(color: Colors.green, onTap: _setShapeColor),
+                      _ColorDot(color: Colors.blue, onTap: _setShapeColor),
+                      _ColorDot(color: Colors.yellow, onTap: _setShapeColor),
+                      _ColorDot(color: Colors.white, onTap: _setShapeColor),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Small helper widget for color buttons
+  class _ColorDot extends StatelessWidget {
+    final Color color;
+    final ValueChanged<Color> onTap;
+
+    const _ColorDot({required this.color, required this.onTap});
+
+    @override
+    Widget build(BuildContext context) {
+      return GestureDetector(
+        onTap: () => onTap(color),
+        child: Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.black26),
+          ),
+        ),
+      );
+    }
+  }
+
+
+
+  // -------- helpers for compute (unchanged) --------
+
+  String _makeTempPngPath() {
+    final dir = Directory.systemTemp.createTempSync('anno_');
+    return p.join(dir.path, 'edited_${DateTime.now().millisecondsSinceEpoch}.png');
+  }
+
+  Future<void> _writeBytesToPath(Map<String, Object> args) async {
+    final bytes = args['bytes'] as Uint8List;
+    final path = args['path'] as String;
+    final f = File(path)..createSync(recursive: true);
+    final raf = f.openSync(mode: FileMode.write);
+    try {
+      raf.writeFromSync(bytes);
+      raf.flushSync();
+    } finally {
+      raf.closeSync();
+    }
+  }

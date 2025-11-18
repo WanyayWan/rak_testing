@@ -194,6 +194,8 @@ class _DetailsPageState extends State<DetailsPage> {
   // Offset _fittedTopLeft = Offset.zero; // top-left offset of the drawn imag   
   final List<PinData> _pins = []; 
 
+  int? _activePinIndex;
+
   //late final Future<Directory> _projDirFuture;
 
   @override                    
@@ -283,24 +285,25 @@ void didChangeDependencies() {
                     ),
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
-                    icon: const Icon(Icons.brush),
-                    label: const Text('Re-annotate photo'),
-                    onPressed: () async {
-                      final String? savedPath = await Navigator.push<String>(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AnnotatePhotoPage(
-                            imagePath: d.photoPath,
-                            finalSavePath: d.photoPath, // overwrite same file
-                          ),
-                        ),
-                      );
-                      if (savedPath != null) {
-                        setModal(() {});
-                        await precacheImage(FileImage(File(savedPath)), context);
-                      }
-                    },
-                  ),
+  icon: const Icon(Icons.brush),
+  label: const Text('Re-annotate photo'),
+  onPressed: () async {
+    final String? savedPath = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AnnotatePhotoPage(
+          imagePath: d.originalPhotoPath, // ✅ CLEAN photo
+          finalSavePath: d.photoPath,     // ✅ overwrite annotated image only
+        ),
+      ),
+    );
+    if (savedPath != null) {
+      await precacheImage(FileImage(File(savedPath)), context);
+      setModal(() {}); // refresh sheet UI
+    }
+  },
+),
+
 
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
@@ -889,142 +892,45 @@ Future<void> _pickOrCaptureBlueprint() async {
 
     // NEW
       // 3) annotate — write ONCE directly to final destination
-      final photosDir = await _photosDir();
-      final filename  = 'ann_${DateTime.now().millisecondsSinceEpoch}.png';
-      final absPath   = p.join(photosDir.path, filename);
+      // 3) create two files: RAW + ANNOTATED
+final photosDir = await _photosDir();
+final ts = DateTime.now().millisecondsSinceEpoch.toString();
 
-      final String? savedPath = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AnnotatePhotoPage(
-            imagePath: picked.path,
-            finalSavePath: absPath, // single write; no temp→copy
-          ),
-        ),
-      );
-      if (savedPath == null) return null;
+final rawPath = p.join(photosDir.path, 'raw_$ts.png');
+final annPath = p.join(photosDir.path, 'ann_$ts.png');
+
+// Save a clean copy of the picked image (original)
+await File(rawPath).writeAsBytes(await File(picked.path).readAsBytes());
+
+// 4) annotate starting from the RAW, writing into annPath
+final String? savedPath = await Navigator.push<String>(
+  context,
+  MaterialPageRoute(
+    builder: (_) => AnnotatePhotoPage(
+      imagePath: rawPath,   // ✅ clean source
+      finalSavePath: annPath, // ✅ annotated output
+    ),
+  ),
+);
+if (savedPath == null) return null;
 
 // (optional) precache to remove first-frame decode hitch
 await precacheImage(FileImage(File(savedPath)), context);
 
+// 5) collect meta (same as you already do)...
+// after you get `result` from bottom sheet:
 
-    // 5) collect priority + note (with confirmation + defaults)
-    final result = await showModalBottomSheet<Map<String, String>>(
-  context: context,
-  isScrollControlled: true,
-  useSafeArea: true,
-  builder: (sheetCtx) {
-    final noteCtrl = TextEditingController();
-    String? severity;
-    String? defectType;
-    String? repairMethod;
-
-    return StatefulBuilder(
-      builder: (ctx, setModalState) {
-        final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
-        final sysPad = MediaQuery.of(ctx).viewPadding; // safe padding for bars
-
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 16, right: 16, top: 16 + sysPad.top, bottom: 16 + bottomInset + sysPad.bottom,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text('Defect details', style: TextStyle(fontWeight: FontWeight.bold)),
-
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: severity,
-                  items: kSeverityOptions.map((s) =>
-                    DropdownMenuItem(value: s, child: Text(s))
-                  ).toList(),
-                  onChanged: (v) => setModalState(() => severity = v),
-                  decoration: const InputDecoration(
-                    labelText: 'Severity', border: OutlineInputBorder(),
-                  ),
-                ),
-
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: defectType,
-                  items: kDefectTypes.map((s) =>
-                    DropdownMenuItem(value: s, child: Text(s))
-                  ).toList(),
-                  onChanged: (v) => setModalState(() => defectType = v),
-                  decoration: const InputDecoration(
-                    labelText: 'Defect type', border: OutlineInputBorder(),
-                  ),
-                ),
-
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: repairMethod,
-                  items: kRepairMethods.map((s) =>
-                    DropdownMenuItem(value: s, child: Text(s))
-                  ).toList(),
-                  onChanged: (v) => setModalState(() => repairMethod = v),
-                  decoration: const InputDecoration(
-                    labelText: 'Repair method', border: OutlineInputBorder(),
-                  ),
-                ),
-
-                const SizedBox(height: 10),
-                TextField(
-                  controller: noteCtrl,
-                  minLines: 1, maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'Note (optional)', border: OutlineInputBorder(),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: () async {
-                    // Graceful defaults if user leaves fields empty
-                    String sv = (severity ?? '').trim();
-                    String dt = (defectType ?? '').trim();
-                    String rm = (repairMethod ?? '').trim();
-                    String n  = noteCtrl.text.trim();
-
-                    // If any of the 3 dropdowns are empty -> confirm + set defaults
-                    if (sv.isEmpty || dt.isEmpty || rm.isEmpty) {
-                      final ok = await _confirmSaveWithDefaults();
-                      if (!ok) return;
-                      if (sv.isEmpty) sv = 'General View';
-                      if (dt.isEmpty) dt = 'Other';
-                      if (rm.isEmpty) rm = 'NA';
-                    }
-                    if (n.isEmpty) n = 'No remarks provided';
-
-                    Navigator.pop(sheetCtx, {
-                      'severity': sv,
-                      'defectType': dt,
-                      'repairMethod': rm,
-                      'note': n,
-                    });
-                  },
-                  child: const Text('SAVE'),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  },
+return Defect(
+  photoPath: annPath,          // ✅ final annotated image
+  originalPhotoPath: rawPath,  // ✅ clean original
+  severity: result['severity'] ?? 'General View',
+  defectType: result['defectType'] ?? 'Damaged element',
+  repairMethod: result['repairMethod'] ?? 'NA',
+  note: (result['note']?.trim().isEmpty ?? true)
+      ? 'No remarks provided'
+      : result['note']!.trim(),
 );
-if (result == null) return null;
 
-        return Defect(
-      photoPath: absPath,
-      severity: result['severity'] ?? 'General View',
-      defectType: result['defectType'] ?? 'Damaged element',
-      repairMethod: result['repairMethod'] ?? 'NA',
-      note: (result['note']?.trim().isEmpty ?? true) ? 'No remarks provided' : result['note']!.trim(),
-    ) ;
   }
 
 Future<bool> _confirmSaveWithDefaults() async {
@@ -1219,47 +1125,66 @@ Future<bool> _confirmSaveWithDefaults() async {
                                   final py = pin.ny * imgH;
 
                                   return Positioned(
-                                        left: px - 16,
-                                        top: py - 32,
-                                        child: GestureDetector(
-                                          behavior: HitTestBehavior.translucent,
-                                          onTap: () => _openPinSheet(i),
+                                          left: px - 16,
+                                          top: py - 32,
+                                          child: GestureDetector(
+                                            behavior: HitTestBehavior.translucent,
 
-                                          // Optional: keep long-press inert so it never triggers deletion logic
-                                          onLongPress: () {},
+                                            // 🔹 Finger goes down on the pin → mark as active (bigger)
+                                            onTapDown: (_) {
+                                              setState(() => _activePinIndex = i);
+                                            },
 
-                                          onPanUpdate: (details) {
-                                            // Convert finger coords to the Stack’s local space (fixed frame)
-                                            final box = _pinStackKey.currentContext?.findRenderObject() as RenderBox?;
-                                            if (box == null) return;
+                                            // 🔹 Finger lifts after tap → reset and open bottom sheet
+                                            onTapUp: (_) {
+                                              setState(() => _activePinIndex = null);
+                                              _openPinSheet(i);
+                                            },
 
-                                            final local = box.globalToLocal(details.globalPosition);
+                                            // 🔹 Gesture cancelled (finger dragged off, etc.)
+                                            onTapCancel: () {
+                                              setState(() => _activePinIndex = null);
+                                            },
 
-                                            // Clamp to the drawn image area (Stack is imgW x imgH)
-                                            final clampedX = local.dx.clamp(0.0, imgW);
-                                            final clampedY = local.dy.clamp(0.0, imgH);
+                                            // 🔹 Dragging: start highlighting this pin while moving
+                                            onPanStart: (_) {
+                                              setState(() => _activePinIndex = i);
+                                            },
 
-                                            setState(() {
-                                              _pins[i].nx = (clampedX / imgW).toDouble();
-                                              _pins[i].ny = (clampedY / imgH).toDouble();
-                                            });
-                                          },
+                                            onPanUpdate: (details) {
+                                              final box = _pinStackKey.currentContext?.findRenderObject() as RenderBox?;
+                                              if (box == null) return;
 
-                                          onPanEnd: (_) async {
-                                            // Don’t recompute from _draggingOffset—just persist
-                                            await _savePins();
-                                          },
+                                              final local = box.globalToLocal(details.globalPosition);
 
-                                          child: Stack(
-                                            alignment: Alignment.center,
-                                            children: [
-                                              const Icon(Icons.location_on, size: 36, color: Colors.red),
-                                              // ... label chip
-                                            ],
+                                              final clampedX = local.dx.clamp(0.0, imgW);
+                                              final clampedY = local.dy.clamp(0.0, imgH);
+
+                                              setState(() {
+                                                _pins[i].nx = (clampedX / imgW).toDouble();
+                                                _pins[i].ny = (clampedY / imgH).toDouble();
+                                              });
+                                            },
+
+                                            onPanEnd: (_) async {
+                                              setState(() => _activePinIndex = null); // stop highlight
+                                              await _savePins();
+                                            },
+
+                                            onLongPress: () {}, // keep inert if you like
+
+                                            child: AnimatedScale(
+                                              scale: _activePinIndex == i ? 1.6 : 1.0,   // 👈 bigger when active
+                                              duration: const Duration(milliseconds: 120),
+                                              child: const Icon(
+                                                Icons.location_on,
+                                                size: 36,
+                                                color: Colors.red,
+                                              ),
+                                            ),
                                           ),
-                                        ),
+                                        );
 
-                                      );
 
                                 }),
                             ],
