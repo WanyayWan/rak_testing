@@ -8,27 +8,38 @@ import 'package:path_provider/path_provider.dart'; // lets u find safe directori
 import 'package:flutter/painting.dart'; // for positioning and sizing images
 import 'annotate_photo_page.dart';
 import 'create_page.dart'; 
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 
 
 
 // ---------- Models (per-project) ----------
 
 class Defect {
-  final String photoPath;  
-  final String severity;        
-  final String defectType;     
-  final String repairMethod;   
+  /// Final annotated image you show in UI / export
+  final String photoPath;
+
+  /// Clean original photo (no rectangles drawn on it)
+  final String originalPhotoPath;
+
+  final String severity;
+  final String defectType;
+  final String repairMethod;
   final String note;
 
- Defect({
+  Defect({
     required this.photoPath,
+    required this.originalPhotoPath,
     required this.severity,
     required this.defectType,
     required this.repairMethod,
     required this.note,
   });
-    Defect copyWith({
+
+  Defect copyWith({
     String? photoPath,
+    String? originalPhotoPath,
     String? severity,
     String? defectType,
     String? repairMethod,
@@ -36,6 +47,7 @@ class Defect {
   }) {
     return Defect(
       photoPath: photoPath ?? this.photoPath,
+      originalPhotoPath: originalPhotoPath ?? this.originalPhotoPath,
       severity: severity ?? this.severity,
       defectType: defectType ?? this.defectType,
       repairMethod: repairMethod ?? this.repairMethod,
@@ -43,24 +55,28 @@ class Defect {
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        'photoPath': photoPath,
+        'originalPhotoPath': originalPhotoPath,
+        'severity': severity,
+        'defectType': defectType,
+        'repairMethod': repairMethod,
+        'note': note,
+      };
 
-  Map<String, dynamic> toJson() => { // building a map for json encoding
-    'photoPath': photoPath,
-    'severity': severity,
-    'defectType': defectType,
-    'repairMethod': repairMethod,
-    'note': note,
-  };
-//the keyword factory is used to define a special kind of constructor —
-//one that can control what gets returned when you create an object.
-  factory Defect.fromJson(Map<String, dynamic> m) => Defect( // takes a Json back to Defect object
-    photoPath: (m['photoPath'] as String?) ?? '',
-    severity:  (m['severity']  as String?) ?? '',
-    defectType: (m['defectType'] as String?) ?? '',
-    repairMethod: (m['repairMethod'] as String?) ?? '',
-    note: (m['note'] as String?) ?? '',
-  );
+  factory Defect.fromJson(Map<String, dynamic> m) => Defect(
+        photoPath: (m['photoPath'] as String?) ?? '',
+        // For old saved data where this key doesn’t exist yet,
+        // fall back to photoPath so app doesn’t crash.
+        originalPhotoPath:
+            (m['originalPhotoPath'] as String?) ?? (m['photoPath'] as String? ?? ''),
+        severity: (m['severity'] as String?) ?? '',
+        defectType: (m['defectType'] as String?) ?? '',
+        repairMethod: (m['repairMethod'] as String?) ?? '',
+        note: (m['note'] as String?) ?? '',
+      );
 }
+
 
 class ProjectMeta {
   final String location;     // required
@@ -358,6 +374,7 @@ void didChangeDependencies() {
                         _pins[pinIndex].defects[defectIndex] = Defect(
                           photoPath: d.photoPath,
                           severity: sv,
+                          originalPhotoPath: d.originalPhotoPath,
                           defectType: dt,
                           repairMethod: rm,
                           note: n,
@@ -863,75 +880,192 @@ Future<void> _pickOrCaptureBlueprint() async {
   // ---------- Defect capture + annotate + meta ----------
 
   Future<Defect?> _captureAndAnnotateDefect() async {
-    // 1) choose source
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_camera),
-              title: const Text('Camera'),
-              onTap: () => Navigator.pop(ctx, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Gallery'),
-              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
-            ),
-          ],
-        ),
+  // 1) choose source
+  final source = await showModalBottomSheet<ImageSource>(
+    context: context,
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.photo_camera),
+            title: const Text('Camera'),
+            onTap: () => Navigator.pop(ctx, ImageSource.camera),
+          ),
+          ListTile(
+            leading: const Icon(Icons.photo_library),
+            title: const Text('Gallery'),
+            onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+          ),
+        ],
       ),
-    );
-    if (source == null) return null;
-
-    // 2) pick
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 92);
-    if (picked == null) return null;
-
-    // NEW
-      // 3) annotate — write ONCE directly to final destination
-      // 3) create two files: RAW + ANNOTATED
-final photosDir = await _photosDir();
-final ts = DateTime.now().millisecondsSinceEpoch.toString();
-
-final rawPath = p.join(photosDir.path, 'raw_$ts.png');
-final annPath = p.join(photosDir.path, 'ann_$ts.png');
-
-// Save a clean copy of the picked image (original)
-await File(rawPath).writeAsBytes(await File(picked.path).readAsBytes());
-
-// 4) annotate starting from the RAW, writing into annPath
-final String? savedPath = await Navigator.push<String>(
-  context,
-  MaterialPageRoute(
-    builder: (_) => AnnotatePhotoPage(
-      imagePath: rawPath,   // ✅ clean source
-      finalSavePath: annPath, // ✅ annotated output
     ),
-  ),
-);
-if (savedPath == null) return null;
+  );
+  if (source == null) return null;
 
-// (optional) precache to remove first-frame decode hitch
-await precacheImage(FileImage(File(savedPath)), context);
+  // 2) pick
+  final picked = await ImagePicker().pickImage(source: source, imageQuality: 92);
+  if (picked == null) return null;
 
-// 5) collect meta (same as you already do)...
-// after you get `result` from bottom sheet:
+  // 3) create two files: RAW + ANNOTATED
+  final photosDir = await _photosDir();
+  final ts = DateTime.now().millisecondsSinceEpoch.toString();
 
-return Defect(
-  photoPath: annPath,          // ✅ final annotated image
-  originalPhotoPath: rawPath,  // ✅ clean original
-  severity: result['severity'] ?? 'General View',
-  defectType: result['defectType'] ?? 'Damaged element',
-  repairMethod: result['repairMethod'] ?? 'NA',
-  note: (result['note']?.trim().isEmpty ?? true)
-      ? 'No remarks provided'
-      : result['note']!.trim(),
-);
+  final rawPath = p.join(photosDir.path, 'raw_$ts.png');
+  final annPath = p.join(photosDir.path, 'ann_$ts.png');
 
-  }
+  // Save a clean copy of the picked image (original)
+  await File(rawPath).writeAsBytes(await File(picked.path).readAsBytes());
+
+  // 4) annotate starting from the RAW, writing into annPath
+  final String? savedPath = await Navigator.push<String>(
+    context,
+    MaterialPageRoute(
+      builder: (_) => AnnotatePhotoPage(
+        imagePath: rawPath,    // clean source
+        finalSavePath: annPath, // annotated output
+      ),
+    ),
+  );
+  if (savedPath == null) return null;
+
+  // optional: precache annotated image
+  await precacheImage(FileImage(File(savedPath)), context);
+
+  // 5) collect priority + note (with confirmation + defaults)
+  final result = await showModalBottomSheet<Map<String, String>>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (sheetCtx) {
+      final noteCtrl = TextEditingController();
+      String? severity;
+      String? defectType;
+      String? repairMethod;
+
+      return StatefulBuilder(
+        builder: (ctx, setModalState) {
+          final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+          final sysPad = MediaQuery.of(ctx).viewPadding;
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 16 + sysPad.top,
+              bottom: 16 + bottomInset + sysPad.bottom,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text('Defect details',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: severity,
+                    items: kSeverityOptions
+                        .map((s) =>
+                            DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(),
+                    onChanged: (v) => setModalState(() => severity = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Severity',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: defectType,
+                    items: kDefectTypes
+                        .map((s) =>
+                            DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(),
+                    onChanged: (v) => setModalState(() => defectType = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Defect type',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: repairMethod,
+                    items: kRepairMethods
+                        .map((s) =>
+                            DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(),
+                    onChanged: (v) => setModalState(() => repairMethod = v),
+                    decoration: const InputDecoration(
+                      labelText: 'Repair method',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: noteCtrl,
+                    minLines: 1,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'Note (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () async {
+                      String sv = (severity ?? '').trim();
+                      String dt = (defectType ?? '').trim();
+                      String rm = (repairMethod ?? '').trim();
+                      String n = noteCtrl.text.trim();
+
+                      if (sv.isEmpty || dt.isEmpty || rm.isEmpty) {
+                        final ok = await _confirmSaveWithDefaults();
+                        if (!ok) return;
+                        if (sv.isEmpty) sv = 'General View';
+                        if (dt.isEmpty) dt = 'Other';
+                        if (rm.isEmpty) rm = 'NA';
+                      }
+                      if (n.isEmpty) n = 'No remarks provided';
+
+                      Navigator.pop(sheetCtx, {
+                        'severity': sv,
+                        'defectType': dt,
+                        'repairMethod': rm,
+                        'note': n,
+                      });
+                    },
+                    child: const Text('SAVE'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      );
+    },
+  );
+
+  if (result == null) return null;
+
+  // 6) Build final Defect object
+  return Defect(
+    photoPath: annPath,
+    originalPhotoPath: rawPath,
+    severity: result['severity'] ?? 'General View',
+    defectType: result['defectType'] ?? 'Damaged element',
+    repairMethod: result['repairMethod'] ?? 'NA',
+    note: (result['note']?.trim().isEmpty ?? true)
+        ? 'No remarks provided'
+        : result['note']!.trim(),
+  );
+}
+
 
 Future<bool> _confirmSaveWithDefaults() async {
   return await showDialog<bool>(
