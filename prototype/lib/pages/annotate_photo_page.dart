@@ -8,64 +8,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
-Future<String> renderAndSaveImage(Map<String, dynamic> args) async {
-  final Uint8List originalBytes = args['originalBytes'] as Uint8List;
-  final String path = args['path'] as String;
-  final List rectsJson = args['rects'] as List;
-  final double strokeWidth = args['strokeWidth'] as double;
-
-  // Decode FULL resolution image
-  final codec = await ui.instantiateImageCodec(originalBytes);
-  final frame = await codec.getNextFrame();
-  final img = frame.image;
-
-  final recorder = ui.PictureRecorder();
-  final canvas = Canvas(recorder);
-  final size = Size(img.width.toDouble(), img.height.toDouble());
-
-  // Draw base image
-  canvas.drawImageRect(
-    img,
-    Rect.fromLTWH(0, 0, size.width, size.height),
-    Rect.fromLTWH(0, 0, size.width, size.height),
-    Paint(),
-  );
-
-  // Draw rectangles
-  for (final item in rectsJson) {
-    final r = RectAnnotation.fromJson(
-      (item as Map).cast<String, dynamic>(),
-    );
-
-    final rect = Rect.fromLTWH(
-      r.nx * size.width,
-      r.ny * size.height,
-      r.nw * size.width,
-      r.nh * size.height,
-    );
-
-    final paint = Paint()
-      ..color = r.color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawRect(rect, paint);
-  }
-
-  final picture = recorder.endRecording();
-  final outImage = await picture.toImage(img.width, img.height);
-  final byteData =
-      await outImage.toByteData(format: ui.ImageByteFormat.png);
-
-  final bytes = byteData!.buffer.asUint8List();
-
-  final file = File(path)..createSync(recursive: true);
-  await file.writeAsBytes(bytes);
-
-  return path;
-}
-
 /// Simple rectangle model stored as normalized coordinates (0..1)
 class RectAnnotation {
   final double nx;   // normalized left
@@ -471,9 +413,10 @@ void _onPanEnd(Size sceneSize) {
   // ---------- Export PNG with rectangles baked in ----------
 
   Future<void> _export() async {
-  if (_isSaving) return;
+  if (_isSaving || _image == null) return;
   setState(() => _isSaving = true);
 
+  // Small loader so user knows something is happening
   showDialog(
     context: context,
     barrierDismissible: false,
@@ -482,30 +425,56 @@ void _onPanEnd(Size sceneSize) {
   await Future.delayed(const Duration(milliseconds: 16));
 
   try {
-    // 1) Read original bytes
-    final originalBytes = await File(widget.imagePath).readAsBytes();
+    // 🟢 Use the already downscaled preview image
+    final img = _image!; 
+    final size = Size(img.width.toDouble(), img.height.toDouble());
 
-    // 2) Convert rects to JSON so they’re sendable
-    final rectsJson = _rects.map((r) => r.toJson()).toList();
+    final recorder = ui.PictureRecorder();
+    final canvas   = Canvas(recorder);
 
-    final path = _rasterPath;
+    // 1) Draw base image
+    const src = Offset.zero;
+    final srcRect = Rect.fromLTWH(0, 0, size.width, size.height);
+    final dstRect = Rect.fromLTWH(0, 0, size.width, size.height);
+    canvas.drawImageRect(img, srcRect, dstRect, Paint());
 
-    // 3) Do heavy work in a background isolate
-    final savedPath = await compute<Map<String, dynamic>, String>(
-      renderAndSaveImage,
-      {
-        'originalBytes': originalBytes,
-        'rects': rectsJson,
-        'path': path,
-        'strokeWidth': 6.0, // thicker lines in exported PNG
-      },
-    );
+    // 2) Draw rectangles (thicker lines)
+    for (final r in _rects) {
+      final rect = Rect.fromLTWH(
+        r.nx * size.width,
+        r.ny * size.height,
+        r.nw * size.width,
+        r.nh * size.height,
+      );
+      final paint = Paint()
+        ..color = r.color
+        ..strokeWidth = 6.0               // 👈 exported thickness
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round;
+
+      canvas.drawRect(rect, paint);
+    }
+
+    final picture  = recorder.endRecording();
+    final outImage = await picture.toImage(img.width, img.height);
+    final byteData = await outImage.toByteData(format: ui.ImageByteFormat.png);
+    if (byteData == null) {
+      if (mounted) Navigator.of(context).pop(); // close loader
+      return;
+    }
+
+    final pngBytes = byteData.buffer.asUint8List();
+
+    // 3) Write PNG
+    final targetPath = _rasterPath;
+    final file = File(targetPath)..createSync(recursive: true);
+    await file.writeAsBytes(pngBytes);
 
     await _saveRectsToJson();
 
     if (!mounted) return;
-    Navigator.of(context).pop();           // close loader
-    Navigator.of(context).pop(savedPath);  // return annotated path
+    Navigator.of(context).pop();            // close loader
+    Navigator.of(context).pop(targetPath);  // return annotated path
   } catch (e) {
     if (mounted) {
       Navigator.of(context).pop(); // close loader
@@ -517,10 +486,6 @@ void _onPanEnd(Size sceneSize) {
     if (mounted) setState(() => _isSaving = false);
   }
 }
-
-
-
-
 
 
   // ---------- UI ----------
@@ -720,7 +685,7 @@ class _AnnotPainter extends CustomPainter {
     if (draftRectLocal != null) {
       final draftPaint = Paint()
         ..color = (draftColor ?? Colors.red).withOpacity(0.7)
-        ..strokeWidth = 4
+        ..strokeWidth = 5
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round;
       canvas.drawRect(draftRectLocal!, draftPaint);
