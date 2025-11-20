@@ -8,9 +8,8 @@ import 'package:path_provider/path_provider.dart'; // lets u find safe directori
 import 'package:flutter/painting.dart'; // for positioning and sizing images
 import 'annotate_photo_page.dart';
 import 'create_page.dart'; 
-import 'dart:typed_data';
-import 'dart:ui' as ui;
-import 'package:flutter/foundation.dart';
+import 'package:pdf/widgets.dart' as pw;
+
 
 
 
@@ -101,6 +100,28 @@ class ProjectMeta {
         personInCharge: (m['PIC'] as String?) ?? '',
       );
 }
+class _FlatDefect {
+  final String snLabel;
+  final String pinLabel;
+  final String level;
+  final String defectType;
+  final String severity;
+  final String description;
+  final String remedial;
+  final String photoPath; // <- NEW: path to annotated photo
+
+  _FlatDefect({
+    required this.snLabel,
+    required this.pinLabel,
+    required this.level,
+    required this.defectType,
+    required this.severity,
+    required this.description,
+    required this.remedial,
+    required this.photoPath,
+  });
+}
+
 
 class PinData {
   double nx; // 0..1
@@ -225,6 +246,294 @@ class _DetailsPageState extends State<DetailsPage> {
   late String _locationId;
   //late String _locationName;
   late Future<Directory> _locationDirFuture;
+
+pw.Widget _pdfInfoRow(String label, String value) {
+  return pw.Row(
+    crossAxisAlignment: pw.CrossAxisAlignment.start,
+    children: [
+      pw.SizedBox(
+        width: 110,
+        child: pw.Text(
+          label,
+          style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+        ),
+      ),
+      pw.Expanded(
+        child: pw.Text(
+          value,
+          style: const pw.TextStyle(fontSize: 9),
+        ),
+      ),
+    ],
+  );
+}
+
+String _fmtDate(DateTime d) =>
+    '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+Future<void> _exportRakStyleReport() async {
+  try {
+    // 1) Flatten all defects across pins
+    final List<_FlatDefect> flatDefects = [];
+    int snCounter = 1;
+
+    for (final pin in _pins) {
+      for (final d in pin.defects) {
+        flatDefects.add(
+          _FlatDefect(
+            snLabel: 'v$snCounter',
+            pinLabel: pin.label,
+            level: '-', // extend later if you store real level
+            defectType: d.defectType,
+            severity: d.severity,
+            description: d.note,
+            remedial: d.repairMethod,
+            photoPath: d.photoPath, // make sure _FlatDefect has this field
+          ),
+        );
+        snCounter++;
+      }
+    }
+
+    if (flatDefects.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No defects to export')),
+      );
+      return;
+    }
+
+    debugPrint('PDF export: start, defects count = ${flatDefects.length}');
+
+    // 2) Create PDF using default Helvetica
+    final doc = pw.Document();
+
+    // 3) Load blueprint image (if any) safely
+    pw.MemoryImage? blueprintImg;
+    try {
+      if (_entry.blueprintImagePath != null &&
+          _entry.blueprintImagePath!.trim().isNotEmpty) {
+        debugPrint('Loading blueprint: ${_entry.blueprintImagePath}');
+        final bpFile = File(_entry.blueprintImagePath!);
+        if (await bpFile.exists()) {
+          final bytes = await bpFile.readAsBytes();
+          blueprintImg = pw.MemoryImage(bytes);
+          debugPrint('Blueprint loaded OK');
+        } else {
+          debugPrint('Blueprint file does not exist: ${_entry.blueprintImagePath}');
+        }
+      }
+    } catch (e, st) {
+      debugPrint('Error loading blueprint image: $e\n$st');
+      blueprintImg = null; // skip, but continue export
+    }
+
+    // 4) Load defect images safely
+    final Map<String, pw.MemoryImage> defectImages = {};
+    for (final fd in flatDefects) {
+      final path = fd.photoPath;
+      if (path.isEmpty || defectImages.containsKey(path)) continue;
+
+      try {
+        debugPrint('Loading defect image: $path');
+        final f = File(path);
+        if (!await f.exists()) {
+          debugPrint('Defect image does not exist: $path');
+          continue;
+        }
+        final bytes = await f.readAsBytes();
+        defectImages[path] = pw.MemoryImage(bytes);
+        debugPrint('Defect image loaded OK: $path');
+      } catch (e, st) {
+        debugPrint('Error loading defect image "$path": $e\n$st');
+        // skip this one only
+      }
+    }
+
+    debugPrint('PDF export: images prepared, building pages...');
+
+    // 5) Build PDF content
+    doc.addPage(
+      pw.MultiPage(
+        build: (ctx) {
+          return [
+            // --- HEADER ---
+            pw.Text(
+              _entry.site,
+              style: pw.TextStyle(
+                fontSize: 18,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              'Location: ${_locCtrl.text.trim().isEmpty ? "-" : _locCtrl.text.trim()}',
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+            if (_date != null)
+              pw.Text(
+                'Date: ${_fmtDate(_date!)}',
+                style: const pw.TextStyle(fontSize: 10),
+              ),
+            if (_personInChargeCtrl.text.trim().isNotEmpty)
+              pw.Text(
+                'PIC: ${_personInChargeCtrl.text.trim()}',
+                style: const pw.TextStyle(fontSize: 10),
+              ),
+            if (_remarksCtrl.text.trim().isNotEmpty) ...[
+              pw.SizedBox(height: 4),
+              pw.Text(
+                'Remarks: ${_remarksCtrl.text.trim()}',
+                style: const pw.TextStyle(fontSize: 9),
+              ),
+            ],
+
+            // --- BLUEPRINT IMAGE (optional) ---
+            if (blueprintImg != null) ...[
+              pw.SizedBox(height: 12),
+              pw.Center(
+                child: pw.Container(
+                  height: 200,
+                  child: pw.Image(
+                    blueprintImg!,
+                    fit: pw.BoxFit.contain,
+                  ),
+                ),
+              ),
+            ],
+
+            pw.SizedBox(height: 16),
+
+            // --- TITLE ---
+            pw.Text(
+              'APPENDIX C  VISUAL INSPECTION REPORT',
+              style: pw.TextStyle(
+                fontSize: 12,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 10),
+
+            pw.Text(
+              'Table 1: Summary of Defects Captured in Visual Inspection',
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+            pw.SizedBox(height: 6),
+
+            // --- SUMMARY TABLE ---
+            pw.Table.fromTextArray(
+              headers: const [
+                'S/N (Photo)',
+                'Elevation',
+                'Level',
+                'Defect Type',
+                'Severity',
+                'Description',
+                'Recommended remedial',
+              ],
+              data: flatDefects.map((fd) {
+                return [
+                  fd.snLabel,
+                  fd.pinLabel,
+                  fd.level,
+                  fd.defectType,
+                  fd.severity,
+                  fd.description,
+                  fd.remedial,
+                ];
+              }).toList(),
+              headerStyle: pw.TextStyle(
+                fontWeight: pw.FontWeight.bold,
+                fontSize: 8,
+              ),
+              cellStyle: const pw.TextStyle(fontSize: 8),
+              cellAlignment: pw.Alignment.centerLeft,
+            ),
+
+            pw.SizedBox(height: 20),
+
+            // --- DETAILED SECTIONS WITH PHOTOS (optional) ---
+            ...flatDefects.map((fd) {
+              final img = defectImages[fd.photoPath];
+              return pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'VISUAL INSPECTION / S/N ${fd.snLabel}',
+                    style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold,
+                      fontSize: 10,
+                    ),
+                  ),
+                  pw.SizedBox(height: 4),
+                  _pdfInfoRow('Elevation', fd.pinLabel),
+                  _pdfInfoRow('Level', fd.level),
+                  _pdfInfoRow('Defect Type', fd.defectType),
+                  _pdfInfoRow('Severity', fd.severity),
+                  _pdfInfoRow('Description', fd.description),
+                  _pdfInfoRow('Remedial Measures', fd.remedial),
+
+                  if (img != null) ...[
+                    pw.SizedBox(height: 6),
+                    pw.Center(
+                      child: pw.Container(
+                        height: 160,
+                        child: pw.Image(
+                          img,
+                          fit: pw.BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  pw.SizedBox(height: 16),
+                ],
+              );
+            }).toList(),
+          ];
+        },
+      ),
+    );
+
+    debugPrint('PDF export: pages built, saving to Downloads...');
+
+    // 6) Save to Downloads folder (same as when it worked before)
+    final downloadsDir = Directory('/storage/emulated/0/Download');
+
+    if (!await downloadsDir.exists()) {
+      await downloadsDir.create(recursive: true);
+    }
+
+    final safeSite = _entry.site.replaceAll(RegExp(r'[^\w]+'), '_');
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final filePath = p.join(
+      downloadsDir.path,
+      'rak_report_${safeSite}_$timestamp.pdf',
+    );
+
+    final file = File(filePath);
+    await file.writeAsBytes(await doc.save());
+
+    debugPrint('PDF export: saved OK at $filePath');
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'RAK-style report (with photos & blueprint) saved to Downloads:\n$filePath',
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  } catch (e, st) {
+    debugPrint('PDF export failed: $e\n$st');
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Export failed: $e')),
+    );
+  }
+}
+
 
 @override
 void didChangeDependencies() {
@@ -1093,15 +1402,23 @@ Future<bool> _confirmSaveWithDefaults() async {
 
     return Scaffold(
           appBar: AppBar(
-      title: Text('Tap to Tag — ${_entry.site}'),
-      actions: [
-       /* IconButton(
-          tooltip: _entry.blueprintImagePath == null ? 'Add blueprint' : 'Replace blueprint',
-          icon: const Icon(Icons.image_outlined),
-          onPressed: _pickOrCaptureBlueprint,
-        ), */
-      ],
+  title: Text('Tap to Tag — ${_entry.site}'),
+  actions: [
+    IconButton(
+      tooltip: 'Export RAK report (PDF)',
+      icon: const Icon(Icons.picture_as_pdf),
+      onPressed: _exportRakStyleReport,
     ),
+    /* If you want the blueprint button back as well, you can keep this:
+    IconButton(
+      tooltip: _entry.blueprintImagePath == null ? 'Add blueprint' : 'Replace blueprint',
+      icon: const Icon(Icons.image_outlined),
+      onPressed: _pickOrCaptureBlueprint,
+    ),
+    */
+  ],
+),
+
      body: SafeArea(           
       top: true,
       bottom: true,
