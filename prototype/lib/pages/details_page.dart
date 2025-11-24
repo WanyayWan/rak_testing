@@ -9,8 +9,8 @@ import 'package:flutter/painting.dart'; // for positioning and sizing images
 import 'annotate_photo_page.dart';
 import 'create_page.dart'; 
 import 'package:pdf/widgets.dart' as pw;
-
-
+import 'package:pdf/pdf.dart';
+import 'dart:math' as math;
 
 
 // ---------- Models (per-project) ----------
@@ -352,6 +352,34 @@ Future<void> _exportRakStyleReport() async {
 
     debugPrint('PDF export: images prepared, building pages...');
 
+        // 4.5) Compute fitted blueprint size (same logic as BoxFit.contain in the app)
+    const double bpMaxW = 400.0;  // PDF container width
+    const double bpMaxH = 250.0;  // PDF container height
+
+    double bpDrawW = bpMaxW;
+    double bpDrawH = bpMaxH;
+    double bpOffsetX = 0.0;
+    double bpOffsetY = 0.0;
+
+    if (_imagePixels != null) {
+      final iw = _imagePixels!.width;
+      final ih = _imagePixels!.height;
+
+      if (iw > 0 && ih > 0) {
+        final scale = math.min(bpMaxW / iw, bpMaxH / ih);
+        bpDrawW = iw * scale;
+        bpDrawH = ih * scale;
+
+        // center inside bpMaxW x bpMaxH (letterboxing)
+        bpOffsetX = (bpMaxW - bpDrawW) / 2.0;
+        bpOffsetY = (bpMaxH - bpDrawH) / 2.0;
+      }
+    }
+
+    debugPrint('PDF blueprint fit: img=$_imagePixels, '
+        'draw=($bpDrawW x $bpDrawH) at offset=($bpOffsetX, $bpOffsetY)');
+
+
     // 5) Build PDF content
     doc.addPage(
       pw.MultiPage(
@@ -388,19 +416,72 @@ Future<void> _exportRakStyleReport() async {
               ),
             ],
 
-            // --- BLUEPRINT IMAGE (optional) ---
+          
+            // --- BLUEPRINT IMAGE WITH PINS (optional) ---
             if (blueprintImg != null) ...[
               pw.SizedBox(height: 12),
               pw.Center(
                 child: pw.Container(
-                  height: 200,
-                  child: pw.Image(
-                    blueprintImg!,
-                    fit: pw.BoxFit.contain,
+                  width: bpMaxW,
+                  height: bpMaxH,
+                  child: pw.Stack(
+                    children: [
+                      // Draw the fitted blueprint image
+                      pw.Positioned(
+                        left: bpOffsetX,
+                        top: bpOffsetY,
+                        child: pw.SizedBox(
+                          width: bpDrawW,
+                          height: bpDrawH,
+                          child: pw.Image(
+                            blueprintImg!,
+                            fit: pw.BoxFit.fill, // aspect ratio already handled
+                          ),
+                        ),
+                      ),
+
+                      // Draw all pins on top
+                      ..._pins.map((pin) {
+                        // Convert normalized (0..1) to fitted blueprint space
+                        final double px = bpOffsetX + pin.nx * bpDrawW;
+                        final double py = bpOffsetY + pin.ny * bpDrawH;
+
+                        return pw.Positioned(
+                          left: px - 6, // adjust to center the circle
+                          top: py - 6,
+                          child: pw.Column(
+                            mainAxisSize: pw.MainAxisSize.min,
+                            children: [
+                              // Big visible red dot (the "pin")
+                              pw.Container(
+                                width: 12,  // 🔼 make this bigger if you want bigger pins
+                                height: 12,
+                                decoration: pw.BoxDecoration(
+                                  color: PdfColors.red,
+                                  shape: pw.BoxShape.circle,
+                                ),
+                              ),
+
+                              if (pin.label.isNotEmpty)
+                                pw.Text(
+                                  pin.label,
+                                  style: pw.TextStyle(
+                                    fontSize: 8,          // 🔼 increase for bigger label
+                                    color: PdfColors.red,
+                                    fontWeight: pw.FontWeight.bold,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
                   ),
                 ),
               ),
             ],
+
+
 
             pw.SizedBox(height: 16),
 
