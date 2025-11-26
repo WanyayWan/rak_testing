@@ -221,7 +221,7 @@ Future<void> _editLocation(LocationLabel loc) async {
     (
       appBar: AppBar
       (
-        title: Text('Locations — ${_entry.site}'),
+        title: Text(' ${_entry.site}'),
       ),
       body: SafeArea
       (
@@ -281,7 +281,7 @@ Future<void> _editLocation(LocationLabel loc) async {
       (
           onPressed: _addLocation,            // <-- just call your helper
           icon: const Icon(Icons.add),
-          label: const Text('Create Location'),
+          label: const Text('Create Defect Locations'),
       ),
 
     );

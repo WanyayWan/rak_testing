@@ -919,29 +919,79 @@ Future<void> _pickOrCaptureBlueprint() async {
   );
 }
 
+Future<ProjectMeta?> _findAnyMetaForProject() async {
+  try {
+    final docs = await getApplicationDocumentsDirectory();
+    final projLocDir = Directory(
+      p.join(docs.path, 'data', 'projects', _entry.id, 'locations'),
+    );
+
+    if (!await projLocDir.exists()) return null;
+
+    ProjectMeta? latestMeta;
+    DateTime latestTime = DateTime.fromMillisecondsSinceEpoch(0);
+
+    await for (final entity in projLocDir.list(recursive: true, followLinks: false)) {
+      if (entity is File && p.basename(entity.path) == 'project_meta.json') {
+        final stat = await entity.stat();
+        if (stat.modified.isAfter(latestTime)) {
+          try {
+            final raw = await entity.readAsString();
+            final m = ProjectMeta.fromJson(
+              (jsonDecode(raw) as Map).cast<String, dynamic>(),
+            );
+            latestMeta = m;
+            latestTime = stat.modified;
+          } catch (_) {
+            // ignore bad files
+          }
+        }
+      }
+    }
+
+    return latestMeta;
+  } catch (e) {
+    debugPrint('findAnyMetaForProject failed: $e');
+    return null;
+  }
+}
+
 
 
 
   Future<void> _loadMeta() async {
-    try {
-      final f = await _metaFile();
-      if (await f.exists()) {
-        final raw = await f.readAsString();
-        final m = ProjectMeta.fromJson((jsonDecode(raw) as Map).cast<String, dynamic>());
-        if (!mounted) return;
-        setState(() {
-          _locCtrl.text = m.location;
-          _date = m.date;
-          _remarksCtrl.text = m.remarks;
-          _personInChargeCtrl.text = m.personInCharge;
-        });
-      } else {
-        _date = null; // not set yet
-      }
-    } catch (e) {
-      debugPrint('Load meta failed: $e');
+  try {
+    final f = await _metaFile();
+    if (await f.exists()) {
+      // normal per-location load
+      final raw = await f.readAsString();
+      final m = ProjectMeta.fromJson(
+        (jsonDecode(raw) as Map).cast<String, dynamic>(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _locCtrl.text = m.location;
+        _date = m.date;
+        _remarksCtrl.text = m.remarks;
+        _personInChargeCtrl.text = m.personInCharge;
+      });
+    } else {
+      // no meta for this location yet → auto-fill from latest project meta
+      final fallback = await _findAnyMetaForProject();
+      if (!mounted) return;
+      setState(() {
+        _locCtrl.text = ''; // new location -> let user type
+        _remarksCtrl.text = '';
+        _date = fallback?.date ?? DateTime.now();         // 🔹 auto date
+        _personInChargeCtrl.text = fallback?.personInCharge ?? ''; // 🔹 auto PIC
+      });
     }
+  } catch (e) {
+    debugPrint('Load meta failed: $e');
   }
+}
+
+
 
   Future<void> _saveMeta() async {
     if (!_metaFormKey.currentState!.validate()) return;

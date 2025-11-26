@@ -10,10 +10,10 @@ import 'package:path/path.dart' as p;
 
 /// Simple rectangle model stored as normalized coordinates (0..1)
 class RectAnnotation {
-  final double nx;   // normalized left
-  final double ny;   // normalized top
-  final double nw;   // normalized width
-  final double nh;   // normalized height
+  final double nx; // normalized left
+  final double ny; // normalized top
+  final double nw; // normalized width
+  final double nh; // normalized height
   final Color color;
 
   const RectAnnotation({
@@ -59,7 +59,7 @@ class RectAnnotation {
 
 class AnnotatePhotoPage extends StatefulWidget {
   static const route = '/anotate_photo';
-  final String imagePath;      // original or current image
+  final String imagePath; // original or current image
   final String? finalSavePath; // where to save annotated PNG
 
   const AnnotatePhotoPage({
@@ -71,10 +71,11 @@ class AnnotatePhotoPage extends StatefulWidget {
   @override
   State<AnnotatePhotoPage> createState() => _AnnotatePhotoPageState();
 }
+
 enum _DragMode { none, drawing, moving, resizing }
 
 class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
-  ui.Image? _image;                   // decoded image for painting/export
+  ui.Image? _image; // decoded image for painting/export
   bool _isSaving = false;
 
   // All rectangles (vector objects)
@@ -82,20 +83,16 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
   int? _selectedIndex;
 
   // For drawing / moving
-  Offset? _dragStartLocal;           // where finger went down (in local coords)
-  Offset? _dragStartRectTopLeft;     // starting rect top-left (for moving)
+  Offset? _dragStartLocal; // where finger went down (in local coords)
+  Offset? _dragStartRectTopLeft; // starting rect top-left (for moving)
   bool _isMoving = false;
-  Rect? _draftRectLocal;             // current drawing rect (local coords)
+  Rect? _draftRectLocal; // current drawing rect (local coords)
 
   _DragMode _dragMode = _DragMode.none;
-  Offset? _resizeFixedCornerLocal;   // anchor for resizing
-  
+  Offset? _resizeFixedCornerLocal; // anchor for resizing
 
   // Current color for new rectangles
   Color _currentColor = Colors.red;
-
-  // For zoom / pan
-  final TransformationController _transform = TransformationController();
 
   // ---------- Helpers for path / JSON ----------
 
@@ -115,44 +112,42 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
     _loadImageAndRects();
   }
 
-Future<void> _loadImageAndRects() async {
-  // 1) Decode a downscaled image for fast interaction
-  final bytes = await File(widget.imagePath).readAsBytes();
+  Future<void> _loadImageAndRects() async {
+    // 1) Decode a downscaled image for fast interaction
+    final bytes = await File(widget.imagePath).readAsBytes();
 
-  // ⬇️ This is the key: decode with targetWidth so it’s much smaller
-  const targetWidth = 1440; // tweak if needed (1080–1600 is a nice range)
-  final codec = await ui.instantiateImageCodec(
-    bytes,
-    targetWidth: targetWidth,
-  );
-  final frame = await codec.getNextFrame();
-  final img = frame.image;
+    const targetWidth = 1440; // tweak if needed
+    final codec = await ui.instantiateImageCodec(
+      bytes,
+      targetWidth: targetWidth,
+    );
+    final frame = await codec.getNextFrame();
+    final img = frame.image;
 
-  // 2) Load existing rects from JSON (if any)
-  final jsonFile = File(_jsonPath);
-  List<RectAnnotation> loaded = [];
-  if (await jsonFile.exists()) {
-    try {
-      final raw = await jsonFile.readAsString();
-      final list = (jsonDecode(raw) as List).cast<dynamic>();
-      loaded = list
-          .map((e) => RectAnnotation.fromJson(
-              (e as Map).cast<String, dynamic>()))
-          .toList();
-    } catch (_) {
-      // ignore malformed JSON, just start clean
+    // 2) Load existing rects from JSON (if any)
+    final jsonFile = File(_jsonPath);
+    List<RectAnnotation> loaded = [];
+    if (await jsonFile.exists()) {
+      try {
+        final raw = await jsonFile.readAsString();
+        final list = (jsonDecode(raw) as List).cast<dynamic>();
+        loaded = list
+            .map((e) =>
+                RectAnnotation.fromJson((e as Map).cast<String, dynamic>()))
+            .toList();
+      } catch (_) {
+        // ignore malformed JSON, just start clean
+      }
     }
+
+    if (!mounted) return;
+    setState(() {
+      _image = img; // this is now a smaller preview image
+      _rects
+        ..clear()
+        ..addAll(loaded);
+    });
   }
-
-  if (!mounted) return;
-  setState(() {
-    _image = img;            // this is now a smaller preview image
-    _rects
-      ..clear()
-      ..addAll(loaded);
-  });
-}
-
 
   Future<void> _saveRectsToJson() async {
     try {
@@ -167,7 +162,6 @@ Future<void> _loadImageAndRects() async {
 
   @override
   void dispose() {
-    _transform.dispose();
     super.dispose();
   }
 
@@ -182,193 +176,191 @@ Future<void> _loadImageAndRects() async {
     }
     return null;
   }
+
   Offset? _hitResizeHandle(Offset local, Size sceneSize) {
-  if (_selectedIndex == null) return null;
-  final r = _rects[_selectedIndex!];
+    if (_selectedIndex == null) return null;
+    final r = _rects[_selectedIndex!];
 
-  final rectLocal = Rect.fromLTWH(
-    r.nx * sceneSize.width,
-    r.ny * sceneSize.height,
-    r.nw * sceneSize.width,
-    r.nh * sceneSize.height,
-  );
-
-  // same handle size as painter
-  const handleSize = 8.0;
-  const hitRadius = 16.0;
-
-  final corners = <Offset>[
-    rectLocal.topLeft,
-    rectLocal.topRight,
-    rectLocal.bottomLeft,
-    rectLocal.bottomRight,
-  ];
-
-  // if user is near any corner, return the *opposite* corner as the fixed anchor
-  Offset? opposite;
-
-  for (int i = 0; i < corners.length; i++) {
-    final c = corners[i];
-    final d = (local - c).distance;
-    if (d <= hitRadius) {
-      switch (i) {
-        case 0: // topLeft -> opposite is bottomRight
-          opposite = rectLocal.bottomRight;
-          break;
-        case 1: // topRight -> bottomLeft
-          opposite = rectLocal.bottomLeft;
-          break;
-        case 2: // bottomLeft -> topRight
-          opposite = rectLocal.topRight;
-          break;
-        case 3: // bottomRight -> topLeft
-          opposite = rectLocal.topLeft;
-          break;
-      }
-      break;
-    }
-  }
-
-  return opposite; // null if not near any handle
-}
-
-
-  void _onPanStart(Offset local, Size sceneSize) {
-  if (_image == null) return;
-
-  _dragStartLocal = local;
-  _draftRectLocal = null;
-  _dragStartRectTopLeft = null;
-  _resizeFixedCornerLocal = null;
-
-  // 1) Check if user grabbed a resize handle on the selected rect
-  final fixed = _hitResizeHandle(local, sceneSize);
-  if (fixed != null) {
-    _dragMode = _DragMode.resizing;
-    _resizeFixedCornerLocal = fixed;
-    setState(() {}); // just to update selection visuals if needed
-    return;
-  }
-
-  // 2) Hit test any rect (topmost first)
-  final nx = local.dx / sceneSize.width;
-  final ny = local.dy / sceneSize.height;
-  final hit = _hitTestRect(Offset(nx, ny));
-
-  if (hit != null) {
-    // Start moving this rect
-    _selectedIndex = hit;
-    _dragMode = _DragMode.moving;
-    final r = _rects[hit];
-    _dragStartRectTopLeft = Offset(
+    final rectLocal = Rect.fromLTWH(
       r.nx * sceneSize.width,
       r.ny * sceneSize.height,
+      r.nw * sceneSize.width,
+      r.nh * sceneSize.height,
     );
-  } else {
-    // Start drawing a new rect
-    _selectedIndex = null;
-    _dragMode = _DragMode.drawing;
-    _draftRectLocal = Rect.fromLTWH(local.dx, local.dy, 0, 0);
-  }
 
-  setState(() {});
-}
+    const hitRadius = 16.0;
 
-void _onPanUpdate(Offset local, Size sceneSize) {
-  if (_image == null || _dragStartLocal == null) return;
+    final corners = <Offset>[
+      rectLocal.topLeft,
+      rectLocal.topRight,
+      rectLocal.bottomLeft,
+      rectLocal.bottomRight,
+    ];
 
-  switch (_dragMode) {
-    case _DragMode.drawing:
-      final start = _dragStartLocal!;
-      final left = math.min(start.dx, local.dx);
-      final top = math.min(start.dy, local.dy);
-      final right = math.max(start.dx, local.dx);
-      final bottom = math.max(start.dy, local.dy);
-      setState(() {
-        _draftRectLocal = Rect.fromLTRB(left, top, right, bottom);
-      });
-      break;
+    // if user is near any corner, return the *opposite* corner as the fixed anchor
+    Offset? opposite;
 
-    case _DragMode.moving:
-      if (_selectedIndex == null || _dragStartRectTopLeft == null) return;
-      final delta = local - _dragStartLocal!;
-      final newTopLeft = _dragStartRectTopLeft! + delta;
-
-      setState(() {
-        final old = _rects[_selectedIndex!];
-        final nx = (newTopLeft.dx / sceneSize.width).clamp(0.0, 1.0);
-        final ny = (newTopLeft.dy / sceneSize.height).clamp(0.0, 1.0);
-        _rects[_selectedIndex!] = old.copyWith(nx: nx, ny: ny);
-      });
-      break;
-
-    case _DragMode.resizing:
-      if (_selectedIndex == null || _resizeFixedCornerLocal == null) return;
-
-      // Create rect between fixed corner and current finger
-      var rLocal = Rect.fromPoints(_resizeFixedCornerLocal!, local);
-
-      // Clamp inside image bounds
-      rLocal = Rect.fromLTWH(
-        rLocal.left.clamp(0.0, sceneSize.width),
-        rLocal.top.clamp(0.0, sceneSize.height),
-        (rLocal.width).clamp(1.0, sceneSize.width),
-        (rLocal.height).clamp(1.0, sceneSize.height),
-      );
-
-      setState(() {
-        final nx = (rLocal.left / sceneSize.width).clamp(0.0, 1.0);
-        final ny = (rLocal.top / sceneSize.height).clamp(0.0, 1.0);
-        final nw = (rLocal.width / sceneSize.width).clamp(0.0, 1.0);
-        final nh = (rLocal.height / sceneSize.height).clamp(0.0, 1.0);
-        final old = _rects[_selectedIndex!];
-        _rects[_selectedIndex!] = old.copyWith(nx: nx, ny: ny, nw: nw, nh: nh);
-      });
-      break;
-
-    case _DragMode.none:
-      break;
-  }
-}
-
-void _onPanEnd(Size sceneSize) {
-  if (_image == null) return;
-
-  if (_dragMode == _DragMode.drawing && _draftRectLocal != null) {
-    final r = _draftRectLocal!;
-
-    if (r.width >= 4 && r.height >= 4) {
-      final nx = (r.left / sceneSize.width).clamp(0.0, 1.0);
-      final ny = (r.top / sceneSize.height).clamp(0.0, 1.0);
-      final nw = (r.width / sceneSize.width).clamp(0.0, 1.0);
-      final nh = (r.height / sceneSize.height).clamp(0.0, 1.0);
-
-      setState(() {
-        _rects.add(RectAnnotation(
-          nx: nx,
-          ny: ny,
-          nw: nw,
-          nh: nh,
-          color: _currentColor,
-        ));
-        _selectedIndex = _rects.length - 1;
-        _draftRectLocal = null;
-      });
-      _saveRectsToJson();
-    } else {
-      setState(() => _draftRectLocal = null);
+    for (int i = 0; i < corners.length; i++) {
+      final c = corners[i];
+      final d = (local - c).distance;
+      if (d <= hitRadius) {
+        switch (i) {
+          case 0: // topLeft -> opposite is bottomRight
+            opposite = rectLocal.bottomRight;
+            break;
+          case 1: // topRight -> bottomLeft
+            opposite = rectLocal.bottomLeft;
+            break;
+          case 2: // bottomLeft -> topRight
+            opposite = rectLocal.topRight;
+            break;
+          case 3: // bottomRight -> topLeft
+            opposite = rectLocal.topLeft;
+            break;
+        }
+        break;
+      }
     }
-  } else if (_dragMode == _DragMode.moving ||
-             _dragMode == _DragMode.resizing) {
-    _saveRectsToJson();
+
+    return opposite; // null if not near any handle
   }
 
-  _dragMode = _DragMode.none;
-  _dragStartLocal = null;
-  _dragStartRectTopLeft = null;
-  _resizeFixedCornerLocal = null;
-}
+  void _onPanStart(Offset local, Size sceneSize) {
+    if (_image == null) return;
 
+    _dragStartLocal = local;
+    _draftRectLocal = null;
+    _dragStartRectTopLeft = null;
+    _resizeFixedCornerLocal = null;
+
+    // 1) Check if user grabbed a resize handle on the selected rect
+    final fixed = _hitResizeHandle(local, sceneSize);
+    if (fixed != null) {
+      _dragMode = _DragMode.resizing;
+      _resizeFixedCornerLocal = fixed;
+      setState(() {}); // just to update selection visuals if needed
+      return;
+    }
+
+    // 2) Hit test any rect (topmost first)
+    final nx = local.dx / sceneSize.width;
+    final ny = local.dy / sceneSize.height;
+    final hit = _hitTestRect(Offset(nx, ny));
+
+    if (hit != null) {
+      // Start moving this rect
+      _selectedIndex = hit;
+      _dragMode = _DragMode.moving;
+      final r = _rects[hit];
+      _dragStartRectTopLeft = Offset(
+        r.nx * sceneSize.width,
+        r.ny * sceneSize.height,
+      );
+    } else {
+      // Start drawing a new rect
+      _selectedIndex = null;
+      _dragMode = _DragMode.drawing;
+      _draftRectLocal = Rect.fromLTWH(local.dx, local.dy, 0, 0);
+    }
+
+    setState(() {});
+  }
+
+  void _onPanUpdate(Offset local, Size sceneSize) {
+    if (_image == null || _dragStartLocal == null) return;
+
+    switch (_dragMode) {
+      case _DragMode.drawing:
+        final start = _dragStartLocal!;
+        final left = math.min(start.dx, local.dx);
+        final top = math.min(start.dy, local.dy);
+        final right = math.max(start.dx, local.dx);
+        final bottom = math.max(start.dy, local.dy);
+        setState(() {
+          _draftRectLocal = Rect.fromLTRB(left, top, right, bottom);
+        });
+        break;
+
+      case _DragMode.moving:
+        if (_selectedIndex == null || _dragStartRectTopLeft == null) return;
+        final delta = local - _dragStartLocal!;
+        final newTopLeft = _dragStartRectTopLeft! + delta;
+
+        setState(() {
+          final old = _rects[_selectedIndex!];
+          final nx = (newTopLeft.dx / sceneSize.width).clamp(0.0, 1.0);
+          final ny = (newTopLeft.dy / sceneSize.height).clamp(0.0, 1.0);
+          _rects[_selectedIndex!] = old.copyWith(nx: nx, ny: ny);
+        });
+        break;
+
+      case _DragMode.resizing:
+        if (_selectedIndex == null || _resizeFixedCornerLocal == null) return;
+
+        // Create rect between fixed corner and current finger
+        var rLocal = Rect.fromPoints(_resizeFixedCornerLocal!, local);
+
+        // Clamp inside image bounds
+        rLocal = Rect.fromLTWH(
+          rLocal.left.clamp(0.0, sceneSize.width),
+          rLocal.top.clamp(0.0, sceneSize.height),
+          (rLocal.width).clamp(1.0, sceneSize.width),
+          (rLocal.height).clamp(1.0, sceneSize.height),
+        );
+
+        setState(() {
+          final nx = (rLocal.left / sceneSize.width).clamp(0.0, 1.0);
+          final ny = (rLocal.top / sceneSize.height).clamp(0.0, 1.0);
+          final nw = (rLocal.width / sceneSize.width).clamp(0.0, 1.0);
+          final nh = (rLocal.height / sceneSize.height).clamp(0.0, 1.0);
+          final old = _rects[_selectedIndex!];
+          _rects[_selectedIndex!] =
+              old.copyWith(nx: nx, ny: ny, nw: nw, nh: nh);
+        });
+        break;
+
+      case _DragMode.none:
+        break;
+    }
+  }
+
+  void _onPanEnd(Size sceneSize) {
+    if (_image == null) return;
+
+    if (_dragMode == _DragMode.drawing && _draftRectLocal != null) {
+      final r = _draftRectLocal!;
+
+      if (r.width >= 4 && r.height >= 4) {
+        final nx = (r.left / sceneSize.width).clamp(0.0, 1.0);
+        final ny = (r.top / sceneSize.height).clamp(0.0, 1.0);
+        final nw = (r.width / sceneSize.width).clamp(0.0, 1.0);
+        final nh = (r.height / sceneSize.height).clamp(0.0, 1.0);
+
+        setState(() {
+          _rects.add(RectAnnotation(
+            nx: nx,
+            ny: ny,
+            nw: nw,
+            nh: nh,
+            color: _currentColor,
+          ));
+          _selectedIndex = _rects.length - 1;
+          _draftRectLocal = null;
+        });
+        _saveRectsToJson();
+      } else {
+        setState(() => _draftRectLocal = null);
+      }
+    } else if (_dragMode == _DragMode.moving ||
+        _dragMode == _DragMode.resizing) {
+      _saveRectsToJson();
+    }
+
+    _dragMode = _DragMode.none;
+    _dragStartLocal = null;
+    _dragStartRectTopLeft = null;
+    _resizeFixedCornerLocal = null;
+  }
 
   // ---------- Toolbar actions ----------
 
@@ -413,80 +405,79 @@ void _onPanEnd(Size sceneSize) {
   // ---------- Export PNG with rectangles baked in ----------
 
   Future<void> _export() async {
-  if (_isSaving || _image == null) return;
-  setState(() => _isSaving = true);
+    if (_isSaving || _image == null) return;
+    setState(() => _isSaving = true);
 
-  // Small loader so user knows something is happening
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => const Center(child: CircularProgressIndicator()),
-  );
-  await Future.delayed(const Duration(milliseconds: 16));
+    // Small loader so user knows something is happening
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    await Future.delayed(const Duration(milliseconds: 16));
 
-  try {
-    // 🟢 Use the already downscaled preview image
-    final img = _image!; 
-    final size = Size(img.width.toDouble(), img.height.toDouble());
+    try {
+      // Use the already downscaled preview image
+      final img = _image!;
+      final size = Size(img.width.toDouble(), img.height.toDouble());
 
-    final recorder = ui.PictureRecorder();
-    final canvas   = Canvas(recorder);
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
 
-    // 1) Draw base image
-    const src = Offset.zero;
-    final srcRect = Rect.fromLTWH(0, 0, size.width, size.height);
-    final dstRect = Rect.fromLTWH(0, 0, size.width, size.height);
-    canvas.drawImageRect(img, srcRect, dstRect, Paint());
+      // 1) Draw base image
+      final srcRect = Rect.fromLTWH(0, 0, size.width, size.height);
+      final dstRect = Rect.fromLTWH(0, 0, size.width, size.height);
+      canvas.drawImageRect(img, srcRect, dstRect, Paint());
 
-    // 2) Draw rectangles (thicker lines)
-    for (final r in _rects) {
-      final rect = Rect.fromLTWH(
-        r.nx * size.width,
-        r.ny * size.height,
-        r.nw * size.width,
-        r.nh * size.height,
-      );
-      final paint = Paint()
-        ..color = r.color
-        ..strokeWidth = 6.0               // 👈 exported thickness
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round;
+      // 2) Draw rectangles (thicker lines)
+      for (final r in _rects) {
+        final rect = Rect.fromLTWH(
+          r.nx * size.width,
+          r.ny * size.height,
+          r.nw * size.width,
+          r.nh * size.height,
+        );
+        final paint = Paint()
+          ..color = r.color
+          ..strokeWidth = 6.0
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round;
 
-      canvas.drawRect(rect, paint);
-    }
+        canvas.drawRect(rect, paint);
+      }
 
-    final picture  = recorder.endRecording();
-    final outImage = await picture.toImage(img.width, img.height);
-    final byteData = await outImage.toByteData(format: ui.ImageByteFormat.png);
-    if (byteData == null) {
-      if (mounted) Navigator.of(context).pop(); // close loader
-      return;
-    }
+      final picture = recorder.endRecording();
+      final outImage = await picture.toImage(img.width, img.height);
+      final byteData =
+          await outImage.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) {
+        if (mounted) Navigator.of(context).pop(); // close loader
+        return;
+      }
 
-    final pngBytes = byteData.buffer.asUint8List();
+      final pngBytes = byteData.buffer.asUint8List();
 
-    // 3) Write PNG
-    final targetPath = _rasterPath;
-    final file = File(targetPath)..createSync(recursive: true);
-    await file.writeAsBytes(pngBytes);
+      // 3) Write PNG
+      final targetPath = _rasterPath;
+      final file = File(targetPath)..createSync(recursive: true);
+      await file.writeAsBytes(pngBytes);
 
-    await _saveRectsToJson();
+      await _saveRectsToJson();
 
-    if (!mounted) return;
-    Navigator.of(context).pop();            // close loader
-    Navigator.of(context).pop(targetPath);  // return annotated path
-  } catch (e) {
-    if (mounted) {
+      if (!mounted) return;
       Navigator.of(context).pop(); // close loader
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Export failed: $e')),
-      );
+      Navigator.of(context).pop(targetPath); // return annotated path
+    } catch (e) {
+      if (mounted) {
+        Navigator.of(context).pop(); // close loader
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
-  } finally {
-    if (mounted) setState(() => _isSaving = false);
   }
-}
-
 
   // ---------- UI ----------
 
@@ -523,26 +514,21 @@ void _onPanEnd(Size sceneSize) {
                   child: SizedBox(
                     width: sceneSize.width,
                     height: sceneSize.height,
-                    child: InteractiveViewer(
-                      transformationController: _transform,
-                      minScale: 0.5,
-                      maxScale: 4,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onPanStart: (d) =>
-                            _onPanStart(d.localPosition, sceneSize),
-                        onPanUpdate: (d) =>
-                            _onPanUpdate(d.localPosition, sceneSize),
-                        onPanEnd: (_) => _onPanEnd(sceneSize),
-                        child: CustomPaint(
-                          size: sceneSize,
-                          painter: _AnnotPainter(
-                            image: img,
-                            rects: _rects,
-                            selectedIndex: _selectedIndex,
-                            draftRectLocal: _draftRectLocal,
-                            draftColor: _currentColor,
-                          ),
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanStart: (d) =>
+                          _onPanStart(d.localPosition, sceneSize),
+                      onPanUpdate: (d) =>
+                          _onPanUpdate(d.localPosition, sceneSize),
+                      onPanEnd: (_) => _onPanEnd(sceneSize),
+                      child: CustomPaint(
+                        size: sceneSize,
+                        painter: _AnnotPainter(
+                          image: img,
+                          rects: _rects,
+                          selectedIndex: _selectedIndex,
+                          draftRectLocal: _draftRectLocal,
+                          draftColor: _currentColor,
                         ),
                       ),
                     ),
@@ -560,13 +546,6 @@ void _onPanEnd(Size sceneSize) {
                 icon: const Icon(Icons.undo),
                 onPressed: _rects.isNotEmpty ? _undo : null,
               ),
-              IconButton(
-                icon: const Icon(Icons.zoom_out_map),
-                onPressed: () {
-                  _transform.value = Matrix4.identity();
-                },
-              ),
-
               IconButton(
                 tooltip: 'Clear all rectangles',
                 icon: const Icon(Icons.layers_clear),
@@ -639,7 +618,7 @@ class _AnnotPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final imgSize = Size(image.width.toDouble(), image.height.toDouble());
 
-    // Draw image scaled to fit exactly the available size (we already computed contain)
+    // Draw image scaled to fit exactly the available size
     final src = Rect.fromLTWH(0, 0, imgSize.width, imgSize.height);
     final dst = Rect.fromLTWH(0, 0, size.width, size.height);
     canvas.drawImageRect(image, src, dst, Paint());
@@ -656,7 +635,7 @@ class _AnnotPainter extends CustomPainter {
       final isSel = (i == selectedIndex);
       final paint = Paint()
         ..color = r.color
-        ..strokeWidth = isSel ?  6 : 4
+        ..strokeWidth = isSel ? 6 : 4
         ..style = PaintingStyle.stroke
         ..strokeCap = StrokeCap.round;
       canvas.drawRect(rect, paint);
