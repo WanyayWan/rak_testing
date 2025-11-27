@@ -51,10 +51,18 @@ class _EditDeletePageState extends State<EditDeletePage> {
         final raw = await file.readAsString();
         final list = (jsonDecode(raw) as List).cast<dynamic>();
         setState(() {
-          _entries
-            ..clear()
-            ..addAll(list.map((e) => ProjectEntry.fromJson((e as Map).cast<String, dynamic>())));
-        });
+  _entries
+    ..clear()
+    ..addAll(list.map((e) =>
+        ProjectEntry.fromJson((e as Map).cast<String, dynamic>())))
+    ..sort((a, b) {
+      // IDs are timestamps → newest should appear first
+      final aTs = int.tryParse(a.id) ?? 0;
+      final bTs = int.tryParse(b.id) ?? 0;
+      return bTs.compareTo(aTs); // 🔹 newest first
+    });
+});
+
       } else {
         setState(() => _entries.clear());
       }

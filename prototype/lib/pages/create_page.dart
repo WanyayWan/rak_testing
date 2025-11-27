@@ -212,6 +212,7 @@ class _CreatePageState extends State<CreatePage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Create A Project'),
+        centerTitle: true,
         backgroundColor: const Color(0xFF1A237E),
         foregroundColor: Colors.white,
       ),

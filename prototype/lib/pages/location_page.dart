@@ -254,7 +254,7 @@ Future<void> _editLocation(LocationLabel loc) async {
                   (
                     child: ListTile(
                     title: Text(loc.name),
-                    subtitle: Text('ID: ${loc.id}'),
+                 //   subtitle: Text('ID: ${loc.id}'),
                     onTap: () => _openLocation(loc),
                     trailing: Row
                           (
