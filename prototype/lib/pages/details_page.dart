@@ -653,12 +653,13 @@ void didChangeDependencies() {
 }
 
  Future<void> _editDefect(int pinIndex, int defectIndex) async {
-  final d = _pins[pinIndex].defects[defectIndex];
+  // Use current defect once for initial dropdown values
+  final initial = _pins[pinIndex].defects[defectIndex];
 
-  String? severity  = _coerceOrNull(d.severity, kSeverityOptions);
-  String? defectType = _coerceOrNull(d.defectType, kDefectTypes);
-  String? repairMethod = _coerceOrNull(d.repairMethod, kRepairMethods);
-  final noteCtrl = TextEditingController(text: d.note);
+  String? severity  = _coerceOrNull(initial.severity, kSeverityOptions);
+  String? defectType = _coerceOrNull(initial.defectType, kDefectTypes);
+  String? repairMethod = _coerceOrNull(initial.repairMethod, kRepairMethods);
+  final noteCtrl = TextEditingController(text: initial.note);
 
   await showModalBottomSheet<void>(
     context: context,
@@ -667,12 +668,16 @@ void didChangeDependencies() {
     builder: (sheetCtx) {
       return StatefulBuilder(
         builder: (ctx, setModal) {
+          // 🔹 Always read the latest defect from state
+          final d = _pins[pinIndex].defects[defectIndex];
+
           final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
           final sysPad = MediaQuery.of(ctx).viewPadding;
 
           return Padding(
             padding: EdgeInsets.only(
-              left: 16, right: 16,
+              left: 16,
+              right: 16,
               top: 16 + sysPad.top,
               bottom: 16 + sysPad.bottom + bottomInset,
             ),
@@ -681,72 +686,114 @@ void didChangeDependencies() {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text('Edit defect', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const Text('Edit defect',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
 
+                  // ---------- Annotated photo preview ----------
                   if (File(d.photoPath).existsSync())
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.file(File(d.photoPath), height: 160, fit: BoxFit.cover),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 220,
+                        child: Image.file(
+                          File(d.photoPath),
+                          // include path + length in key to force rebuild
+                          key: ValueKey('${d.photoPath}_${File(d.photoPath).lengthSync()}'),
+                          fit: BoxFit.contain,     // show full image
+                        ),
+                      ),
                     ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-  icon: const Icon(Icons.brush),
-  label: const Text('Re-annotate photo'),
-  onPressed: () async {
-    final String? savedPath = await Navigator.push<String>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AnnotatePhotoPage(
-          imagePath: d.originalPhotoPath, // ✅ CLEAN photo
-          finalSavePath: d.photoPath,     // ✅ overwrite annotated image only
-        ),
-      ),
-    );
-    if (savedPath != null) {
-      await precacheImage(FileImage(File(savedPath)), context);
-      setModal(() {}); // refresh sheet UI
-    }
-  },
-),
 
+                  const SizedBox(height: 8),
+
+                  // ---------- Re-annotate button ----------
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.brush),
+                    label: const Text('Re-annotate photo'),
+                    onPressed: () async {
+                      final String? savedPath = await Navigator.push<String>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AnnotatePhotoPage(
+                            imagePath: d.originalPhotoPath, // clean source
+                            finalSavePath: d.photoPath,     // overwrite same file
+                          ),
+                        ),
+                      );
+
+                      if (savedPath != null) {
+                        // 🔹 Clear the cached image so Flutter reloads the new bytes
+                        final provider = FileImage(File(savedPath));
+                        await provider.evict();
+
+                        // 🔹 Update defect in main state
+                        setState(() {
+                          _pins[pinIndex].defects[defectIndex] =
+                              _pins[pinIndex].defects[defectIndex].copyWith(
+                            photoPath: savedPath,
+                          );
+                        });
+                        await _savePins();
+
+                        // 🔹 Rebuild bottom sheet UI
+                        setModal(() {});
+                      }
+                    },
+                  ),
 
                   const SizedBox(height: 12),
+
                   DropdownButtonFormField<String>(
                     value: severity,
-                    items: kSeverityOptions.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                    items: kSeverityOptions
+                        .map((s) =>
+                            DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(),
                     onChanged: (v) => setModal(() => severity = v),
                     decoration: const InputDecoration(
-                      labelText: 'Severity', border: OutlineInputBorder(),
+                      labelText: 'Severity',
+                      border: OutlineInputBorder(),
                     ),
                   ),
 
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     value: defectType,
-                    items: kDefectTypes.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                    items: kDefectTypes
+                        .map((s) =>
+                            DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(),
                     onChanged: (v) => setModal(() => defectType = v),
                     decoration: const InputDecoration(
-                      labelText: 'Defect type', border: OutlineInputBorder(),
+                      labelText: 'Defect type',
+                      border: OutlineInputBorder(),
                     ),
                   ),
 
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     value: repairMethod,
-                    items: kRepairMethods.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                    items: kRepairMethods
+                        .map((s) =>
+                            DropdownMenuItem(value: s, child: Text(s)))
+                        .toList(),
                     onChanged: (v) => setModal(() => repairMethod = v),
                     decoration: const InputDecoration(
-                      labelText: 'Repair method', border: OutlineInputBorder(),
+                      labelText: 'Repair method',
+                      border: OutlineInputBorder(),
                     ),
                   ),
 
                   const SizedBox(height: 10),
                   TextField(
                     controller: noteCtrl,
-                    minLines: 1, maxLines: 3,
+                    minLines: 1,
+                    maxLines: 3,
                     decoration: const InputDecoration(
-                      labelText: 'Note', border: OutlineInputBorder(),
+                      labelText: 'Note',
+                      border: OutlineInputBorder(),
                     ),
                   ),
 
@@ -756,22 +803,22 @@ void didChangeDependencies() {
                       final sv = (severity ?? 'General View');
                       final dt = (defectType ?? 'Damaged element');
                       final rm = (repairMethod ?? 'NA');
-                      final n  = noteCtrl.text.trim().isEmpty
+                      final n = noteCtrl.text.trim().isEmpty
                           ? 'No remarks provided'
                           : noteCtrl.text.trim();
 
                       setState(() {
-                        _pins[pinIndex].defects[defectIndex] = Defect(
-                          photoPath: d.photoPath,
+                        _pins[pinIndex].defects[defectIndex] = d.copyWith(
                           severity: sv,
-                          originalPhotoPath: d.originalPhotoPath,
                           defectType: dt,
                           repairMethod: rm,
                           note: n,
                         );
                       });
                       await _savePins();
-                      if (Navigator.of(sheetCtx).canPop()) Navigator.of(sheetCtx).pop();
+                      if (Navigator.of(sheetCtx).canPop()) {
+                        Navigator.of(sheetCtx).pop();
+                      }
                     },
                     child: const Text('Save changes'),
                   ),
@@ -788,6 +835,7 @@ void didChangeDependencies() {
 
   noteCtrl.dispose();
 }
+
 
 // Helper function — add this near bottom of class
 String? _coerceOrNull(String? v, List<String> options) {
@@ -1287,14 +1335,43 @@ Future<ProjectMeta?> _findAnyMetaForProject() async {
                         ),
                         // DELETE defect
                         IconButton(
-                          tooltip: 'Delete',
-                          icon: const Icon(Icons.close, color: Colors.red),
-                          onPressed: () async {
-                            setState(() => _pins[index].defects.removeAt(i));
-                            setModal(() {});
-                            await _savePins();
-                          },
-                        ),
+  tooltip: 'Delete',
+  icon: const Icon(Icons.close, color: Colors.red),
+  onPressed: () async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete defect?'),
+        content: const Text(
+          'This will remove this defect from this pin.\n'
+          'The photo file will remain on the device.\n\n'
+          'Are you sure you want to continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok != true) return;
+
+    setState(() => _pins[index].defects.removeAt(i));
+    setModal(() {});      // refresh bottom sheet UI
+    await _savePins();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Defect deleted')),
+    );
+  },
+),
+
                       ],
                     ),
 

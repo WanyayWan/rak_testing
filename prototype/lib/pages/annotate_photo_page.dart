@@ -375,14 +375,42 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
     });
   }
 
-  void _deleteSelected() {
-    if (_selectedIndex == null) return;
-    setState(() {
-      _rects.removeAt(_selectedIndex!);
-      _selectedIndex = null;
-    });
-    _saveRectsToJson();
-  }
+  void _deleteSelected() async {
+  if (_selectedIndex == null) return;
+
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Delete annotation?'),
+      content: const Text(
+        'Are you sure you want to delete this annotation box?\n'
+        'This action cannot be undone.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text(
+            'Delete',
+            style: TextStyle(color: Colors.red),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  if (confirm != true) return;
+
+  setState(() {
+    _rects.removeAt(_selectedIndex!);
+    _selectedIndex = null;
+  });
+  _saveRectsToJson();
+}
+
 
   void _clearAll() {
     setState(() {
@@ -599,6 +627,7 @@ class _AnnotatePhotoPageState extends State<AnnotatePhotoPage> {
 }
 
 /// Draws the photo + all rectangles.
+/// Draws the photo + all rectangles (improved version with clear selection highlight)
 class _AnnotPainter extends CustomPainter {
   final ui.Image image;
   final List<RectAnnotation> rects;
@@ -618,12 +647,12 @@ class _AnnotPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final imgSize = Size(image.width.toDouble(), image.height.toDouble());
 
-    // Draw image scaled to fit exactly the available size
+    // Draw base image
     final src = Rect.fromLTWH(0, 0, imgSize.width, imgSize.height);
     final dst = Rect.fromLTWH(0, 0, size.width, size.height);
     canvas.drawImageRect(image, src, dst, Paint());
 
-    // Draw stored rectangles
+    // Draw rectangles
     for (int i = 0; i < rects.length; i++) {
       final r = rects[i];
       final rect = Rect.fromLTWH(
@@ -632,42 +661,77 @@ class _AnnotPainter extends CustomPainter {
         r.nw * size.width,
         r.nh * size.height,
       );
-      final isSel = (i == selectedIndex);
-      final paint = Paint()
-        ..color = r.color
-        ..strokeWidth = isSel ? 6 : 4
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round;
-      canvas.drawRect(rect, paint);
 
-      // Optional: draw little "handles" for selected rect
+      final isSel = (i == selectedIndex);
+
       if (isSel) {
-        final handlePaint = Paint()
-          ..color = r.color.withOpacity(0.9)
+        // --- SELECTED RECT: make very obvious ---
+
+        // 1) Fill with low-opacity color
+        final fillPaint = Paint()
+          ..color = r.color.withOpacity(0.20)
           ..style = PaintingStyle.fill;
-        const handleSize = 8.0;
+        canvas.drawRect(rect, fillPaint);
+
+        // 2) Thick dark outer border
+        final outerBorder = Paint()
+          ..color = Colors.black.withOpacity(0.85)
+          ..strokeWidth = 5
+          ..style = PaintingStyle.stroke;
+        canvas.drawRect(rect, outerBorder);
+
+        // 3) Inner colored stroke
+        final innerBorder = Paint()
+          ..color = r.color
+          ..strokeWidth = 3
+          ..style = PaintingStyle.stroke;
+        canvas.drawRect(rect.deflate(2), innerBorder);
+
+        // 4) Corner handles (large circle)
+        const double handleRadius = 9.0;
+
+        final handleFill = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.fill;
+
+        final handleStroke = Paint()
+          ..color = r.color
+          ..strokeWidth = 3
+          ..style = PaintingStyle.stroke;
+
         for (final pt in [
           rect.topLeft,
           rect.topRight,
           rect.bottomLeft,
           rect.bottomRight,
         ]) {
-          canvas.drawRect(
-            Rect.fromCenter(center: pt, width: handleSize, height: handleSize),
-            handlePaint,
-          );
+          canvas.drawCircle(pt, handleRadius, handleFill);
+          canvas.drawCircle(pt, handleRadius, handleStroke);
         }
+      } else {
+        // --- NORMAL RECT ---
+        final paint = Paint()
+          ..color = r.color
+          ..strokeWidth = 3
+          ..style = PaintingStyle.stroke;
+
+        canvas.drawRect(rect, paint);
       }
     }
 
-    // Draw the in-progress rectangle (while dragging)
+    // Draw draft rectangle while dragging / drawing
     if (draftRectLocal != null) {
-      final draftPaint = Paint()
-        ..color = (draftColor ?? Colors.red).withOpacity(0.7)
-        ..strokeWidth = 5
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round;
-      canvas.drawRect(draftRectLocal!, draftPaint);
+      final fillPaint = Paint()
+        ..color = (draftColor ?? Colors.red).withOpacity(0.20)
+        ..style = PaintingStyle.fill;
+
+      final strokePaint = Paint()
+        ..color = draftColor ?? Colors.red
+        ..strokeWidth = 3
+        ..style = PaintingStyle.stroke;
+
+      canvas.drawRect(draftRectLocal!, fillPaint);
+      canvas.drawRect(draftRectLocal!, strokePaint);
     }
   }
 
@@ -679,6 +743,7 @@ class _AnnotPainter extends CustomPainter {
         oldDelegate.draftRectLocal != draftRectLocal;
   }
 }
+
 
 /// Small helper widget for color buttons
 class _ColorDot extends StatelessWidget {
